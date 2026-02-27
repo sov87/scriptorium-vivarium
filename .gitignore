@@ -1,0 +1,18 @@
+# venv
+.venv*/
+__pycache__/
+*.pyc
+
+# local-only artifacts
+data_raw/
+data_proc/
+db/
+indexes/
+runs/
+data_gen/
+logs/
+*.sqlite
+*.sqlite3
+
+# secrets
+.env
