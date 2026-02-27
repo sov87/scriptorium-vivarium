@@ -13,6 +13,9 @@ data_gen/
 logs/
 *.sqlite
 *.sqlite3
+*.egg-info/
+build/
+dist/
 
 # secrets
 .env
