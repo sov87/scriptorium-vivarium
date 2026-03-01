@@ -1,0 +1,241 @@
+{
+  "WEATHER_STATES": [
+    "clear",
+    "overcast",
+    "rain",
+    "storm",
+    "fog"
+  ],
+  "WEATHER_TERMS": {
+    "clear": ["sun", "hot", "dust", "glare", "bright", "clear"],
+    "overcast": ["cloud", "grey", "cool", "breeze", "shadow", "dim"],
+    "rain": ["rain", "wet", "mud", "puddle", "slick", "cloak", "drip"],
+    "storm": ["thunder", "lightning", "flood", "torrent", "wind", "gale"],
+    "fog": ["mist", "fog", "damp", "obscured", "chill", "haze"]
+  },
+  "TIME_TERMS": {
+    "dawn": ["dawn", "morning", "sunrise", "early", "dew", "mist", "cold"],
+    "morning": ["morning", "sun", "day", "busy", "crowd", "market", "shout"],
+    "noon": ["noon", "midday", "sun", "heat", "dust", "glare", "sweat"],
+    "afternoon": ["afternoon", "day", "late", "shadows", "diminish", "fatigue"],
+    "evening": ["evening", "dusk", "sunset", "twilight", "supper", "hearth", "fire"],
+    "night": ["night", "dark", "moon", "lantern", "shadow", "sleep", "watch", "quiet", "danger", "thief"]
+  },
+  "WORLDS": {
+    "rome": {
+      "name": "Rome",
+      "starting_location": "Forum Romanum",
+      "gazetteer_corpus_id": "viv_pleiades_places",
+      "core_keywords": ["rome", "roman", "roma", "romanum"],
+      "eras": {
+        "republic": {
+          "system_context": "ancient Rome, Roman Republic (spanning roughly 509 BC to 27 BC)",
+          "architectural_notes": "The Colosseum, Imperial Fora, and Pantheon DO NOT exist. Architecture is mostly brick, wood, and tuff. The Senate meets in the Curia Hostilia. The Rostra is in its original Republican position.",
+          "bias_groups": [
+            {
+              "triggers": ["republic", "senate", "caesar", "cicero", "pompey", "gracchi", "carthage"],
+              "terms": ["republic", "consul", "tribune", "b.c.", "caesar", "cicero", "sulla", "pompey"]
+            }
+          ]
+        },
+        "augustan": {
+          "system_context": "ancient Rome, Augustan Principate and early Empire (spanning roughly 27 BC to 68 AD)",
+          "architectural_notes": "The city is transitioning from brick to marble. The Colosseum DOES NOT exist yet. The Pantheon is the original Agrippan version (not the giant dome). The Curia Julia is active. Imperial stability is established.",
+          "bias_groups": [
+            {
+              "triggers": ["augustus", "empire", "imperial", "principate", "tiberius", "caligula", "nero"],
+              "terms": ["imperial", "emperor", "augustus", "tiberius", "a.d.", "ad", "agrippa", "marble"]
+            }
+          ]
+        },
+        "flavian": {
+          "system_context": "ancient Rome, Flavian Dynasty and High Empire (spanning roughly 69 AD to 192 AD)",
+          "architectural_notes": "The Colosseum (Flavian Amphitheatre) is newly constructed and highly active. The Temple of Peace exists. The Arch of Titus stands. The Pantheon dome is built later in this era by Hadrian. Trajan's Column may be present.",
+          "bias_groups": [
+            {
+              "triggers": ["colosseum", "flavian", "vespasian", "titus", "domitian", "arena", "hadrian", "trajan"],
+              "terms": ["flavian", "vespasian", "titus", "domitian", "amphitheatre", "colosseum", "arena", "gladiator"]
+            }
+          ]
+        },
+        "late_empire": {
+          "system_context": "ancient Rome, Late Antiquity (spanning roughly 284 AD to 476 AD)",
+          "architectural_notes": "The Basilica of Maxentius/Constantine dominates the Forum. Christian churches are beginning to appear alongside declining traditional Pagan temples. The Arch of Constantine is built. The Aurelian Walls fortify the city.",
+          "bias_groups": [
+            {
+              "triggers": ["constantine", "diocletian", "christian", "pagan", "late empire", "goth", "visigoth"],
+              "terms": ["constantine", "diocletian", "church", "basilica", "christian", "bishop", "late antique", "walls"]
+            }
+          ]
+        }
+      },
+      "life_terms": ["food", "merchant", "smell", "street", "crowd", "tabernae", "dirt", "noise", "pleb", "cart", "speak", "voice", "shout", "say", "conversation", "fight", "coin", "sell", "price", "beggar", "wine", "bread"],
+      "pol_terms": ["law", "senate", "soldier", "guard", "rumor", "augustus", "emperor", "patrician", "slaves", "edict", "decree", "taxes", "praetor", "aedile"],
+      "synonyms": {
+        "barracks": ["castra", "quarters", "camp", "praetorian", "cohort", "legion", "praetorium", "castra praetoria"],
+        "legionary": ["legion", "cohort", "century", "centurion", "castra", "contubernium", "miles", "veteran"],
+        "soldier": ["miles", "legionary", "centurion", "cohort", "castra", "praetorian", "guard"],
+        "market": ["macellum", "tabernae", "shops", "corn", "annona", "emporium", "forum boarium", "forum holitorium"],
+        "forum": ["forum", "comitium", "rostra", "curia", "basilica"],
+        "basilica": ["basilica", "tribunal", "court", "hall", "law court"],
+        "temple": ["templum", "aedes", "shrine", "sanctuary", "altar", "sacellum"],
+        "bath": ["thermae", "balneum", "baths", "frigidarium", "tepidarium", "caldarium", "natatio"],
+        "house": ["domus", "insula", "villa", "atrium", "peristyle", "tenement"],
+        "street": ["via", "vicus", "clivus", "road", "path", "alley", "angiportus"]
+      },
+      "graph": {
+        "forum romanum": {
+          "connections": ["via sacra", "palatine", "comitium", "capitoline", "subura", "tiber", "imperial fora"],
+          "aliases": ["forum", "the forum", "main forum", "plaza", "roman forum"]
+        },
+        "imperial fora": {
+          "connections": ["forum romanum", "subura"],
+          "aliases": ["forum of caesar", "forum of augustus", "forum of trajan", "trajan's forum"],
+          "era_unlocked": ["augustan", "flavian", "late_empire"]
+        },
+        "palatine": {
+          "connections": ["forum romanum", "circus maximus", "via sacra", "colosseum"],
+          "aliases": ["palatine hill", "palatine mount", "imperial palace", "palace", "domus augustana"]
+        },
+        "capitoline": {
+          "connections": ["forum romanum", "campus martius", "tiber"],
+          "aliases": ["capitoline hill", "capitol", "temple of jupiter", "arx", "asylum"]
+        },
+        "comitium": {
+          "connections": ["forum romanum", "curia", "rostra"],
+          "aliases": ["assembly", "comitium", "voting place"]
+        },
+        "curia": {
+          "connections": ["comitium", "forum romanum"],
+          "aliases": ["senate", "senate house", "curia julia", "curia hostilia"]
+        },
+        "rostra": {
+          "connections": ["comitium", "forum romanum"],
+          "aliases": ["speaker's platform", "speaker platform", "rostrum"]
+        },
+        "subura": {
+          "connections": ["forum romanum", "macellum", "via sacra", "imperial fora"],
+          "aliases": ["suburra", "slums", "pleb district", "slum", "red light district"]
+        },
+        "macellum": {
+          "connections": ["subura"],
+          "aliases": ["market", "meat market", "food market", "shops"]
+        },
+        "via sacra": {
+          "connections": ["forum romanum", "palatine", "colosseum", "subura"],
+          "aliases": ["sacred way", "sacred road", "main street"]
+        },
+        "circus maximus": {
+          "connections": ["palatine", "tiber", "baths of caracalla"],
+          "aliases": ["circus", "racetrack", "chariot track", "arena"]
+        },
+        "tiber": {
+          "connections": ["forum romanum", "circus maximus", "campus martius", "transtiberim", "forum boarium"],
+          "aliases": ["tiber river", "river", "riverbank", "docks", "pons fabricius", "pons aemilius"]
+        },
+        "forum boarium": {
+          "connections": ["tiber", "circus maximus"],
+          "aliases": ["cattle market", "meat market", "docks"]
+        },
+        "campus martius": {
+          "connections": ["capitoline", "tiber", "thermae", "theatre of pompey", "pantheon"],
+          "aliases": ["field of mars", "campus", "military camp", "parade ground", "saepta julia"]
+        },
+        "transtiberim": {
+          "connections": ["tiber"],
+          "aliases": ["trastevere", "across the tiber", "foreigners' quarter", "jewish quarter"]
+        },
+        "thermae": {
+          "connections": ["campus martius"],
+          "aliases": ["baths", "public baths", "bathhouse", "baths of agrippa"]
+        },
+        "theatre of pompey": {
+          "connections": ["campus martius"],
+          "aliases": ["pompey's theatre", "theater of pompey", "curia of pompey", "portico of pompey"]
+        },
+        "pantheon": {
+          "connections": ["campus martius"],
+          "aliases": ["temple of all gods", "agrippa's pantheon", "the pantheon", "hadrian's pantheon"],
+          "era_unlocked": ["augustan", "flavian", "late_empire"]
+        },
+        "colosseum": {
+          "connections": ["via sacra", "palatine"],
+          "aliases": ["flavian amphitheatre", "amphitheater", "arena", "the colosseum", "gladiator arena"],
+          "era_unlocked": ["flavian", "late_empire"]
+        },
+        "baths of caracalla": {
+          "connections": ["circus maximus"],
+          "aliases": ["caracalla baths", "thermae antoninianae", "grand baths"],
+          "era_unlocked": ["late_empire"]
+        },
+        "castra praetoria": {
+          "connections": ["subura", "aurelian walls"],
+          "aliases": ["praetorian camp", "barracks", "guard camp", "military base"]
+        },
+        "aurelian walls": {
+          "connections": ["castra praetoria"],
+          "aliases": ["city walls", "defenses", "gates", "porta"],
+          "era_unlocked": ["late_empire"]
+        }
+      }
+    },
+    "anglo_saxon": {
+      "name": "Anglo-Saxon England",
+      "starting_location": "Minster",
+      "gazetteer_corpus_id": "viv_places_as",
+      "core_keywords": ["winchester", "wessex", "anglo-saxon", "saxon", "england", "english"],
+      "eras": {
+        "alfredian": {
+          "system_context": "Anglo-Saxon Winchester, Early Wessex / reign of King Alfred (spanning roughly 800 AD to 950 AD)",
+          "architectural_notes": "The city is heavily fortified against Viking raids. Burh defenses are prominent. Architecture is primarily timber and thatch, with the Old Minster built of stone.",
+          "bias_groups": [{"triggers": ["viking", "dane", "alfred", "wessex"], "terms": ["alfred", "wessex", "dane", "viking", "army", "ship", "fyrd"]}]
+        },
+        "late_saxon": {
+          "system_context": "Anglo-Saxon Winchester, Late Saxon period (spanning roughly 950 AD to 1066 AD)",
+          "architectural_notes": "The New Minster and Nunnaminster stand alongside the Old Minster. The city is wealthy but under severe taxation (Danegeld) pressure.",
+          "bias_groups": [{"triggers": ["aethelred", "cnut", "danegeld", "earl"], "terms": ["aethelred", "cnut", "danegeld", "earldom", "tax", "silver"]}]
+        },
+        "norman_transition": {
+          "system_context": "Winchester, post-Conquest Norman transition (spanning roughly 1066 AD to 1150 AD)",
+          "architectural_notes": "A new Norman stone castle is being constructed, dominating the western skyline. The Saxon minsters still stand but Norman influence is heavily visible.",
+          "bias_groups": [{"triggers": ["norman", "william", "castle", "conquest"], "terms": ["norman", "william", "castle", "knight", "french", "conquest"]}]
+        }
+      },
+      "life_terms": ["food", "merchant", "smell", "street", "mud", "market", "ale", "mead", "wood", "fire", "speak", "voice", "shout", "say", "fight", "coin", "sell", "silver"],
+      "pol_terms": ["law", "king", "thegn", "earl", "ealdorman", "fyrd", "warrior", "bishop", "church", "witan"],
+      "synonyms": {
+        "warrior": ["thegn", "fyrd", "earl", "fighter"],
+        "church": ["minster", "kirk", "priest", "bishop"],
+        "market": ["wic", "trade", "port"],
+        "house": ["hall", "hut", "burh"],
+        "street": ["path", "way", "gate"]
+      },
+      "graph": {
+        "minster": {
+          "connections": ["high street", "palace"],
+          "aliases": ["old minster", "new minster", "church", "cathedral"]
+        },
+        "high street": {
+          "connections": ["minster", "market", "west gate"],
+          "aliases": ["main street", "high way"]
+        },
+        "market": {
+          "connections": ["high street"],
+          "aliases": ["wic", "market square", "trading post"]
+        },
+        "palace": {
+          "connections": ["minster"],
+          "aliases": ["royal hall", "king's hall", "alfred's hall"]
+        },
+        "west gate": {
+          "connections": ["high street", "walls"],
+          "aliases": ["westgate", "city gate", "gatehouse"]
+        },
+        "walls": {
+          "connections": ["west gate"],
+          "aliases": ["city walls", "defenses", "roman walls"]
+        }
+      }
+    }
+  }
+}
