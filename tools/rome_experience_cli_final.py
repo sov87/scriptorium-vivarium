@@ -1135,9 +1135,10 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
                     e.append(f"npc_activity[{i}] sentence[{si}] claims specifics without literal evidence support")
 
     obs = obj.get("observations")
-    if not isinstance(obs, list) or not (1 <= len(obs) <= 12):
-        e.append("observations must be list len 1-12")
+    if not isinstance(obs, list) or len(obs) > 12:
+        e.append("observations must be list len 0-12")
     else:
+        cleaned_obs: List[Dict[str, Any]] = []
         for i, it in enumerate(obs):
             if not isinstance(it, dict):
                 continue
@@ -1149,7 +1150,11 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
             if observation_requires_literal_quote(txt):
                 quote = it.get("quote")
                 if not literal_quote_supported(quote, it.get("evidence_ids", []), packet_map):
-                    e.append(f"observations[{i}] hard historical claim must include literal supporting quote")
+                    # Non-blocking fallback for playability: drop unsupported hard-claim observations
+                    # instead of failing the entire render attempt.
+                    continue
+            cleaned_obs.append(it)
+        obj["observations"] = cleaned_obs
 
     claims = obj.get("claims")
     if not isinstance(claims, list) or len(claims) > 16:
