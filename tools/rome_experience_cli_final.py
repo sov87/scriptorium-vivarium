@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 ===============================================================================
 V I V A R I U M  /  S C R I P T O R I U M
@@ -18,6 +18,7 @@ import os
 import random
 import re
 import sqlite3
+import sqlite_vec
 import string
 import sys
 import textwrap
@@ -424,7 +425,10 @@ def build_and_with_syn_groups(tokens: Sequence[str], world: Dict[str, Any], extr
 class EvidenceStore:
     def __init__(self, db_path: str):
         if not os.path.exists(db_path): die(f"DB not found: {db_path}")
-        self.con = sqlite3.connect(db_path)
+        self.con = sqlite3.connect(db_path, check_same_thread=False)
+        self.con.enable_load_extension(True)
+        sqlite_vec.load(self.con)
+        self.con.enable_load_extension(False)
         self.con.row_factory = sqlite3.Row
         if not self._table("segments_fts"): die("Missing segments_fts")
 
@@ -475,11 +479,13 @@ class EvidenceStore:
             return []
 
         out: List[Dict[str, str]] = []
-        for r in rows:
-            raw_text = norm_ws(str(r["text"]))
+        for row in rows:
+            sid = row["segment_id"]
+            raw_text = norm_ws(str(row["text"]))
+            corpus_id = str(row["corpus_id"]) if "corpus_id" in row.keys() else ""
             out.append({
-                "segment_id": str(r["segment_id"]),
-                "corpus_id": str(r["corpus_id"]) if "corpus_id" in r.keys() else "",
+                "segment_id": sid,
+                "corpus_id": corpus_id,
                 "excerpt": clamp(raw_text, PROMPT_EXCERPT_CHARS),
                 "full_text": raw_text,
                 "source_method": "FTS5"
@@ -491,30 +497,33 @@ class EvidenceStore:
             return []
             
         vec_json = json.dumps(query_vector)
-        
-        sql = f"""
-            SELECT v.segment_id, f.{self.fts_text} as text, f.{self.fts_corpus} as corpus_id
-            FROM segments_vec v
-            JOIN segments_fts f ON v.segment_id = f.{self.fts_sid}
-            WHERE v.embedding MATCH ? 
-            ORDER BY v.distance ASC 
-            LIMIT ?
-        """
-        
         try:
-            rows = self.con.execute(sql, (vec_json, limit)).fetchall()
-        except sqlite3.OperationalError as e:
+            vec_rows = self.con.execute(
+                "SELECT segment_id FROM segments_vec WHERE embedding MATCH ? AND k = ?",
+                (vec_json, limit)
+            ).fetchall()
+        except Exception as e:
+            print(f"[WARN] Vec search error: {e}")
             return []
+        rows = []
+        for vr in vec_rows:
+            sid = str(vr[0])
+            tr = self.con.execute(
+                f"SELECT {self.fts_text} as text, {self.fts_corpus} as corpus_id FROM segments_fts WHERE {self.fts_sid} = ?",
+                (sid,)
+            ).fetchone()
+            if tr:
+                rows.append((sid, tr))
 
         out: List[Dict[str, str]] = []
-        for r in rows:
+        for sid, r in rows:
             raw_text = norm_ws(str(r["text"]))
             cid = str(r["corpus_id"]) if "corpus_id" in r.keys() else ""
             if corpora and cid not in corpora:
                 continue
                 
             out.append({
-                "segment_id": str(r["segment_id"]),
+                "segment_id": sid,
                 "corpus_id": cid,
                 "excerpt": clamp(raw_text, PROMPT_EXCERPT_CHARS),
                 "full_text": raw_text,
@@ -581,7 +590,7 @@ def openai_chat(
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Bearer {api_key}")
         try:
-            with urllib.request.urlopen(req, timeout=240) as resp:
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 last_raw = raw
         except urllib.error.URLError as e:
@@ -615,7 +624,7 @@ def openai_embedding(base_url: str, model: str, text: str, api_key: str) -> List
     req.add_header("Authorization", f"Bearer {api_key}")
     
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             j = json.loads(raw)
             return j["data"][0]["embedding"]
