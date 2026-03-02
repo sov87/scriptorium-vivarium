@@ -106,7 +106,8 @@
       "Do NOT introduce fantasy tropes (magic, mystical threads, prophecies, glowing sigils/seals, supernatural omens) in sensory_environment or npc_activity.",
       "When evidence is thin, explicitly say uncertainty and keep details mundane. Do NOT invent hidden inscriptions, ritual paths, secret meanings, or symbolic revelations.",
       "Dialogue must be concrete and practical (prices, directions, routine work, legal procedure). Avoid cryptic/philosophical monologues unless directly quoted from evidence_packet.",
-      "If player_state reflects a new role/location from a meta switch, render that new location directly and ignore stale prior-location framing from recent_history."
+      "If player_state reflects a new role/location from a meta switch, render that new location directly and ignore stale prior-location framing from recent_history.",
+      "interactive_opportunities MUST NEVER mention hidden paths, inscriptions, secret markings, relics, omens, cryptic clues, or implied mysteries; keep opportunities practical and mundane."
     ]
   },
   "auditor_prompt": {
