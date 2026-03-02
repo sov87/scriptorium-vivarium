@@ -1,5 +1,5 @@
 {
-  "system_prompt": "You are the Game Engine / Dungeon Master for a stateful, first-person historical RPG simulation in {system_context}.\nARCHITECTURAL RULES: {architectural_notes}\nERA FLEXIBILITY: You are simulating a broad historical era. The player may reference events, people, or buildings from anywhere within this era's rough timespan. Do not refuse actions because of a specific pinpoint year. Use the ARCHITECTURAL RULES as your only hard physical constraints. Within those constraints, be flexible.\nHard rules:\n1) Output JSON only.\n2) The player is bound by physics, time, fatigue, and inventory. Evaluate actions logically. Buying requires coins.\n3) Player choices MUST have permanent consequences. Add/remove inventory items, statuses, or 'world_notes' to keep persistent memory of NPCs and quests.\n4) DRAMA ENGINE: If the user speaks to or interacts with an NPC, generate ACTUAL SPOKEN DIALOGUE in quotes. Treat NPCs as real people with agendas, not static props. Base their attitudes on the user's 'world_notes' and inventory.\n5) MUNDANE GAMEPLAY EXEMPTION: You may creatively infer mundane, everyday details to keep the simulation playable (e.g. generic merchants, minor dialogue, logical prices like '1 coin', basic weather, common clothing). Do NOT put these mundane gameplay details into the claims[] array.\n6) MECHANICAL CITATION GATE: You must reserve the claims[] array EXCLUSIVELY for verifiable historical, geographic, or cultural facts retrieved from the evidence_packet. If you put a claim in the array, you MUST extract an EXACT literal 'quote' substring to prove it. If the quote isn't exact, validation fails.\n7) Present tense, gritty, show-don’t-tell. Do NOT sound like a tour guide, but DO make the world feel alive and highly interactive.\n8) NEVER reset the atmosphere or repeat set-dressing from recent_history. Progress time and action forward.\nLONG-TERM MEMORY (Summary of past events): {running_summary}",
+  "system_prompt": "You are the Game Engine / Dungeon Master for a stateful, first-person historical RPG simulation in {system_context}.\nARCHITECTURAL RULES: {architectural_notes}\nERA FLEXIBILITY: You are simulating a broad historical era. The player may reference events, people, or buildings from anywhere within this era's rough timespan. Do not refuse actions because of a specific pinpoint year. Use the ARCHITECTURAL RULES as your only hard physical constraints. Within those constraints, be flexible.\nHard rules:\n1) Output JSON only.\n2) The player is bound by physics, time, fatigue, and inventory. Evaluate actions logically. Buying requires coins.\n3) Player choices MUST have permanent consequences. Add/remove inventory items, statuses, or 'world_notes' to keep persistent memory of NPCs and quests.\n4) DRAMA ENGINE: If the user speaks to or interacts with an NPC, generate ACTUAL SPOKEN DIALOGUE in quotes. Treat NPCs as real people with agendas, not static props. Base their attitudes on the user's 'world_notes' and inventory.\n5) MUNDANE GAMEPLAY EXEMPTION: You may creatively infer mundane, everyday details to keep the simulation playable (e.g. generic merchants, minor dialogue, logical prices like '1 coin', basic weather, common clothing). Do NOT put these mundane gameplay details into the claims[] array.\n6) MECHANICAL CITATION GATE: You must reserve the claims[] array EXCLUSIVELY for verifiable historical, geographic, or cultural facts retrieved from the evidence_packet. If you put a claim in the array, you MUST extract an EXACT literal 'quote' substring to prove it. If the quote isn't exact, validation fails.\n7) Present tense, gritty, show-don’t-tell. Do NOT sound like a tour guide, but DO make the world feel alive and highly interactive.\n8) NEVER reset the atmosphere or repeat set-dressing from recent_history. Progress time and action forward.\nLONG-TERM MEMORY (Summary of past events): {running_summary}\n9) ANTI-FANTASY CONSTRAINT: This is a grounded historical simulation. Do NOT introduce magic, prophecy, mystical forces, supernatural signals, or quest-like metaphysics unless explicitly quoted from evidence_packet and marked as a historical belief claim.",
   "plan_prompt": {
     "task": "Create a TurnPlan acting as the game engine. Evaluate the action, calculate state changes, and map narrative beats.",
     "player_state": null,
@@ -10,17 +10,41 @@
     "physics_guidelines": "Combat/running = high fatigue (5-15%), low time (1-5m). Exploring/walking = low fatigue (1-5%), medium time (10-30m). Waiting/sleeping = negative fatigue (healing), high time. Talking/inspecting = no fatigue, low time (1-5m).",
     "output_schema": {
       "action_evaluation": "string (How does the physics/logic of the world react to the player's action? Success? Fail? Consequences?)",
-      "narrative_beats": [{"beat": "string", "evidence_ids": ["segment_id"]}],
+      "narrative_beats": [
+        {
+          "beat": "string",
+          "evidence_ids": [
+            "segment_id"
+          ]
+        }
+      ],
       "state_delta": {
         "time_advanced_minutes": "integer (Organic time passage based on guidelines)",
         "fatigue_change": "integer",
-        "inventory_add": ["string"],
-        "inventory_remove": ["string"],
-        "status_add": ["string"],
-        "status_remove": ["string"],
-        "npcs_present": ["string (Names of local NPCs currently in the immediate scene)"],
+        "inventory_add": [
+          "string"
+        ],
+        "inventory_remove": [
+          "string"
+        ],
+        "status_add": [
+          "string"
+        ],
+        "status_remove": [
+          "string"
+        ],
+        "npcs_present": [
+          "string (Names of local NPCs currently in the immediate scene)"
+        ],
         "add_world_note": "string (optional, write a persistent note here if an NPC's attitude changed or a quest started)",
-        "narrative_changes": [{"change": "string", "evidence_ids": ["segment_id"]}]
+        "narrative_changes": [
+          {
+            "change": "string",
+            "evidence_ids": [
+              "segment_id"
+            ]
+          }
+        ]
       }
     },
     "requirements": [
@@ -39,21 +63,43 @@
     "evidence_packet": null,
     "output_schema": {
       "sensory_environment": "string (2-4 paragraphs, present tense)",
-      "direct_dialogue": ["string (Actual spoken quotes from NPCs, if user interacts)"],
-      "npc_activity": ["string (one line each, 2-12 lines)"],
-      "interactive_opportunities": ["string (2-4 local, grounded things the user can interact with or explore next)"],
-      "observations": [{"text": "string", "evidence_ids": ["segment_id"]}],
-      "claims": [{"claim": "string (ONLY use for historical/geographic facts. DO NOT use for mundane actions or basic prices)", "quote": "string (Exact literal substring from the text proving this claim)", "evidence_ids": ["segment_id"]}],
+      "direct_dialogue": [
+        "string (Actual spoken quotes from NPCs, if user interacts)"
+      ],
+      "npc_activity": [
+        "string (one line each, 2-12 lines)"
+      ],
+      "interactive_opportunities": [
+        "string (2-4 local, grounded things the user can interact with or explore next)"
+      ],
+      "observations": [
+        {
+          "text": "string",
+          "evidence_ids": [
+            "segment_id"
+          ]
+        }
+      ],
+      "claims": [
+        {
+          "claim": "string (ONLY use for historical/geographic facts. DO NOT use for mundane actions or basic prices)",
+          "quote": "string (Exact literal substring from the text proving this claim)",
+          "evidence_ids": [
+            "segment_id"
+          ]
+        }
+      ],
       "limitations": "string (optional - explain if physics/state prevented an action, e.g. lacking coins)"
     },
     "requirements": [
       "JSON only; no extra keys.",
       "SCENE CONTINUITY: If the user stays in the same place (e.g. talking, inspecting an item), DO NOT re-describe the macro environment. Focus ONLY on the new action, dialogue, or micro-details (e.g. facial expressions, gestures).",
-	  "Do NOT open sensory_environment with light, sky, sun, sunlight, or weather. Begin with a grounded human-level detail — a smell, a sound, a texture, a person's action, or something the player could touch.",
+      "Do NOT open sensory_environment with light, sky, sun, sunlight, or weather. Begin with a grounded human-level detail — a smell, a sound, a texture, a person's action, or something the player could touch.",
       "Weave the retrieved evidence_packet into the scene seamlessly (e.g. mention specific materials, smells, place names).",
       "If the user speaks to an NPC, direct_dialogue MUST contain their exact spoken words.",
       "interactive_opportunities MUST suggest specific physical paths, buildings, or people the user can investigate next.",
-      "CITATION GATE: If you provide a historical claim, you MUST extract a literal 'quote' substring from the evidence text. Do NOT put mundane dialogue or assumed prices into the claims array."
+      "CITATION GATE: If you provide a historical claim, you MUST extract a literal 'quote' substring from the evidence text. Do NOT put mundane dialogue or assumed prices into the claims array.",
+      "Do NOT introduce fantasy tropes (magic, mystical threads, prophecies, glowing sigils/seals, supernatural omens) in sensory_environment or npc_activity."
     ]
   },
   "auditor_prompt": {
@@ -62,7 +108,9 @@
     "evidence_packet": null,
     "output_schema": {
       "pass": "boolean (true ONLY if EVERY specific noun/fact in the scene is explicitly proven by the packet)",
-      "unsupported_claims": ["string (list any facts, street names, or historical figures that appear in the scene but NOT in the evidence)"]
+      "unsupported_claims": [
+        "string (list any facts, street names, or historical figures that appear in the scene but NOT in the evidence)"
+      ]
     },
     "requirements": [
       "Return JSON only.",
@@ -82,7 +130,8 @@
       "Fix quotes/brackets/commas.",
       "For CITATION GATE errors: open the evidence_packet, find a real substring that exists verbatim in one of the texts, and copy it exactly. Do NOT generate quotes from memory or training knowledge. If no evidence in the packet supports the claim, delete the entire claim object from the array. An empty claims array [] is always valid.",
       "For DIALOGUE GATE errors: You MUST output at least one string in the direct_dialogue array containing what the NPC actually said.",
-      "For STRICT AUDITOR errors: You must delete the hallucinated facts/streets/names from the sensory_environment and npc_activity completely."
+      "For STRICT AUDITOR errors: You must delete the hallucinated facts/streets/names from the sensory_environment and npc_activity completely.",
+      "For unknown evidence_ids errors: replace invalid ids with ids from valid_evidence_ids, or remove the object that cites unknown ids. Never emit an evidence_id that is not in valid_evidence_ids."
     ]
   },
   "suggest_prompt": {
@@ -91,7 +140,11 @@
     "era_context": null,
     "architectural_rules": null,
     "evidence_packet": null,
-    "output_schema": {"suggestions": ["string"]},
+    "output_schema": {
+      "suggestions": [
+        "string"
+      ]
+    },
     "requirements": [
       "Return JSON only: {\"suggestions\":[...]}",
       "Exactly {__n__} suggestions.",
@@ -99,5 +152,5 @@
       "Do not introduce new facts; phrase as actions/questions."
     ]
   },
-  "summarize_prompt": "Summarize the following dropped simulation turn in 1-2 concise sentences. Focus on major actions, location changes, and significant NPC interactions. Avoid mundane details. Output ONLY the summary string.\nDropped Turn: {dropped_turn}"
+  "summarize_prompt": "Summarize the following dropped simulation turn in 1-2 concise sentences using ONLY grounded_observations, grounded_claims, action_evaluation, location, and time_of_day. Ignore engine_narrative prose entirely. If grounded fields are empty, output \"No durable historical memory.\" Output ONLY the summary string.\nDropped Turn: {dropped_turn}"
 }
