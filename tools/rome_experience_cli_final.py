@@ -822,8 +822,18 @@ STYLE_CATEGORY_PATTERNS: Dict[str, List[str]] = {
     ],
 }
 
-SPECIFIC_CLAIM_HINT_RE = re.compile(
-    r"(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b|\b\d{2,4}\b|\bcentury\b|\bemperor\b|\bdynasty\b|\bforum\b|\bcolosseum\b|\btemple\b|\bbasilica\b|\baqueduct\b|\bconstructed\b|\bbuilt\b|\binvented\b|\btechnology\b)",
+HARD_HISTORICAL_CLAIM_RE = re.compile(
+    r"(?:\b\d{2,4}\s*(?:ad|bc|ce|bce)?\b|\b(?:emperor|dynasty|century|reign)\b|\b(?:constructed|built|invented|founded|dedicated|completed)\b)",
+    re.IGNORECASE,
+)
+
+ASSERTIVE_FACT_RE = re.compile(
+    r"\b(?:is|was|were|stands|lies|located|dates|belongs)\b",
+    re.IGNORECASE,
+)
+
+SPECIFIC_ENTITY_RE = re.compile(
+    r"\b(?:colosseum|forum\s+romanum|palatine|pantheon|capitoline|via\s+[A-Z][a-z]+|tiber)\b",
     re.IGNORECASE,
 )
 
@@ -842,7 +852,18 @@ def sentence_split(text: str) -> List[str]:
 
 
 def sentence_has_specific_claim(sentence: str) -> bool:
-    return bool(SPECIFIC_CLAIM_HINT_RE.search(sentence or ""))
+    s = (sentence or "").strip()
+    if not s:
+        return False
+
+    if HARD_HISTORICAL_CLAIM_RE.search(s):
+        return True
+
+    # Only treat place-name mentions as hard claims when coupled with assertive factual phrasing.
+    if SPECIFIC_ENTITY_RE.search(s) and ASSERTIVE_FACT_RE.search(s):
+        return True
+
+    return False
 
 
 def literal_quote_supported(quote: str, evidence_ids: List[str], packet_map: Dict[str, str]) -> bool:
@@ -854,6 +875,82 @@ def literal_quote_supported(quote: str, evidence_ids: List[str], packet_map: Dic
         if quote_clean in full_text_clean:
             return True
     return False
+
+
+SUPPORT_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "over", "under", "near", "your", "you", "they", "their",
+    "there", "here", "while", "where", "when", "which", "have", "has", "had", "were", "was", "is", "are", "been", "being",
+    "market", "street", "crowd", "vendor", "vendors", "people", "roman", "rome",
+}
+
+
+HARD_ANCHOR_NAME_BLOCKLIST = {"the", "and", "you", "rome", "roman"}
+
+
+def extract_hard_claim_anchors(sentence: str) -> List[str]:
+    s = sentence or ""
+    anchors: List[str] = []
+
+    for m in re.findall(r"\b\d{2,4}\s*(?:ad|bc|ce|bce)?\b", s, flags=re.IGNORECASE):
+        anchors.append(m.lower().strip())
+
+    for m in re.findall(r"\b(?:colosseum|forum\s+romanum|palatine|pantheon|capitoline|tiber|vespasian|titus|nero|augustus|trajan|hadrian)\b", s, flags=re.IGNORECASE):
+        anchors.append(m.lower())
+
+    for m in re.findall(r"\b[A-Z][a-z]{2,}\b", s):
+        ml = m.lower()
+        if ml not in HARD_ANCHOR_NAME_BLOCKLIST:
+            anchors.append(ml)
+
+    out: List[str] = []
+    for a in anchors:
+        if a and a not in out:
+            out.append(a)
+    return out
+
+
+def sentence_supported_by_evidence(sentence: str, packet_map: Dict[str, str]) -> bool:
+    s_clean = clean_for_match(sentence)
+    if not s_clean:
+        return True
+
+    evidence_clean = [clean_for_match(v) for v in packet_map.values() if v]
+    if not evidence_clean:
+        return False
+
+    # Strongest check: full normalized sentence literal support.
+    if any(s_clean in ev for ev in evidence_clean):
+        return True
+
+    sent_tokens = [
+        tok for tok in re.findall(r"[a-z0-9]+", s_clean)
+        if len(tok) >= 4 and tok not in SUPPORT_STOPWORDS
+    ]
+    if len(sent_tokens) < 2:
+        # Avoid blocking low-information lines.
+        return True
+
+    sent_set = set(sent_tokens)
+    max_overlap = 0
+    for ev in evidence_clean:
+        ev_set = set(re.findall(r"[a-z0-9]+", ev))
+        overlap = len(sent_set.intersection(ev_set))
+        if overlap > max_overlap:
+            max_overlap = overlap
+
+    # Require stronger support for hard historical assertions.
+    if HARD_HISTORICAL_CLAIM_RE.search(sentence or ""):
+        anchors = extract_hard_claim_anchors(sentence)
+        if anchors:
+            evidence_blob = " ".join(evidence_clean)
+            if not all(clean_for_match(a) in evidence_blob for a in anchors[:4]):
+                return False
+        return max_overlap >= 2
+
+    if SPECIFIC_ENTITY_RE.search(sentence or "") and ASSERTIVE_FACT_RE.search(sentence or ""):
+        return max_overlap >= 2
+
+    return True
 
 
 def validate_evidence_ids(evs: Any, packet_ids: Set[str]) -> Optional[str]:
@@ -995,7 +1092,7 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
         if style_hits:
             e.append(f"sensory_environment contains forbidden style categories: {style_hits[:3]}")
         for si, sent in enumerate(sentence_split(se)):
-            if sentence_has_specific_claim(sent) and not any(clean_for_match(sent) in clean_for_match(v) for v in packet_map.values()):
+            if sentence_has_specific_claim(sent) and not sentence_supported_by_evidence(sent, packet_map):
                 e.append(f"sensory_environment sentence[{si}] claims specifics without literal evidence support")
 
     dd = obj.get("direct_dialogue")
@@ -1028,7 +1125,7 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
             e.append(f"npc_activity contains forbidden style categories: {style_hits[:3]}")
         for i, line in enumerate([x for x in na if isinstance(x, str)]):
             for si, sent in enumerate(sentence_split(line)):
-                if sentence_has_specific_claim(sent) and not any(clean_for_match(sent) in clean_for_match(v) for v in packet_map.values()):
+                if sentence_has_specific_claim(sent) and not sentence_supported_by_evidence(sent, packet_map):
                     e.append(f"npc_activity[{i}] sentence[{si}] claims specifics without literal evidence support")
 
     obs = obj.get("observations")
