@@ -790,12 +790,90 @@ def retrieve_packet_with_quotas(
 PLAN_REQUIRED_KEYS = {"action_evaluation", "narrative_beats", "state_delta"}
 RENDER_REQUIRED_KEYS = {"sensory_environment", "direct_dialogue", "npc_activity", "interactive_opportunities", "observations", "claims"}
 
+FANTASY_BANNED_PATTERNS = [
+    r"\bmagic(?:al)?\b",
+    r"\bmystic(?:al)?\b",
+    r"\bspell(?:s)?\b",
+    r"\benchant(?:ed|ment)?\b",
+    r"\brune(?:s)?\b",
+    r"\bprophe(?:cy|sied|sized)\b",
+    r"\bglowing\s+(?:sigil|seal|thread|glyph)s?\b",
+    r"\barcane\b",
+    r"\bhidden\s+rhythm\b",
+    r"\bsilence\s+between\b",
+    r"\blaw\s+breathes?\b",
+    r"\bcharged\s+with\s+the\s+weight\s+of\s+unspoken\s+knowledge\b",
+    r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
+    r"\bthe\s+city[’']s\s+hidden\s+rhythm\b",
+]
+
+
+def find_banned_fantasy_terms(text: str) -> List[str]:
+    found: List[str] = []
+    hay = (text or "").lower()
+    for pat in FANTASY_BANNED_PATTERNS:
+        if re.search(pat, hay, flags=re.IGNORECASE):
+            found.append(pat)
+    return found
+
 def validate_evidence_ids(evs: Any, packet_ids: Set[str]) -> Optional[str]:
     if not isinstance(evs, list): return "evidence_ids must be a list"
     if len(evs) == 0: return None
     bad = [x for x in evs if x not in packet_ids]
     if bad: return f"unknown evidence_ids {bad[:4]}"
     return None
+
+
+
+def sanitize_evidence_ids_list(evs: Any, packet_ids: Set[str]) -> List[str]:
+    if not isinstance(evs, list):
+        return []
+    cleaned: List[str] = []
+    for x in evs:
+        if isinstance(x, str) and x in packet_ids and x not in cleaned:
+            cleaned.append(x)
+    return cleaned
+
+
+def sanitize_plan_evidence_ids(obj: Any, packet_ids: Set[str]) -> None:
+    if not isinstance(obj, dict):
+        return
+    beats = obj.get("narrative_beats")
+    if isinstance(beats, list):
+        for it in beats:
+            if isinstance(it, dict):
+                it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+    delta = obj.get("state_delta")
+    if isinstance(delta, dict):
+        changes = delta.get("narrative_changes")
+        if isinstance(changes, list):
+            for it in changes:
+                if isinstance(it, dict):
+                    it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+
+def sanitize_render_evidence_ids(obj: Any, packet_ids: Set[str]) -> None:
+    if not isinstance(obj, dict):
+        return
+
+    obs = obj.get("observations")
+    if isinstance(obs, list):
+        for it in obs:
+            if isinstance(it, dict):
+                it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+    claims = obj.get("claims")
+    if isinstance(claims, list):
+        cleaned_claims: List[Dict[str, Any]] = []
+        for it in claims:
+            if not isinstance(it, dict):
+                continue
+            cleaned_ids = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+            it["evidence_ids"] = cleaned_ids
+            if cleaned_ids:
+                cleaned_claims.append(it)
+        obj["claims"] = cleaned_claims
 
 def validate_plan(obj: Any, packet_ids: Set[str]) -> List[str]:
     e: List[str] = []
@@ -872,20 +950,39 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
     se = obj.get("sensory_environment")
     if not isinstance(se, str) or len(se.strip()) < 50:
         e.append("sensory_environment too short or invalid")
+    else:
+        fantasy_hits = find_banned_fantasy_terms(se)
+        if fantasy_hits:
+            e.append(f"sensory_environment contains fantasy-only language prohibited by simulation constraints: {fantasy_hits[:3]}")
 
     dd = obj.get("direct_dialogue")
     if not isinstance(dd, list) or len(dd) > 15:
         e.append("direct_dialogue must be a list (can be empty, up to 15 items)")
     elif is_social and len(dd) == 0:
         e.append("MECHANICAL DIALOGUE GATE: User intent was social ('talk', 'ask'). You MUST provide 'direct_dialogue'.")
+    else:
+        dialogue_text = " ".join(x for x in dd if isinstance(x, str))
+        fantasy_hits = find_banned_fantasy_terms(dialogue_text)
+        if fantasy_hits:
+            e.append(f"direct_dialogue contains prohibited metaphysical language: {fantasy_hits[:3]}")
 
     io = obj.get("interactive_opportunities")
     if not isinstance(io, list) or not (1 <= len(io) <= 6):
         e.append("interactive_opportunities must be list len 1-6")
+    else:
+        io_text = " ".join(x for x in io if isinstance(x, str))
+        fantasy_hits = find_banned_fantasy_terms(io_text)
+        if fantasy_hits:
+            e.append(f"interactive_opportunities contains prohibited metaphysical language: {fantasy_hits[:3]}")
 
     na = obj.get("npc_activity")
     if not isinstance(na, list) or not (2 <= len(na) <= 12):
         e.append("npc_activity must be list len 2-12")
+    else:
+        npc_text = " ".join(x for x in na if isinstance(x, str))
+        fantasy_hits = find_banned_fantasy_terms(npc_text)
+        if fantasy_hits:
+            e.append(f"npc_activity contains fantasy-only language prohibited by simulation constraints: {fantasy_hits[:3]}")
 
     obs = obj.get("observations")
     if not isinstance(obs, list) or not (1 <= len(obs) <= 12):
@@ -966,7 +1063,21 @@ def build_repair_prompt(kind: str, bad: str, errors: List[str], packet: List[Dic
     d["validation_errors"] = errors
     d["invalid_output"] = clamp(bad, 2000)
     d["evidence_packet"] = [{"id": p["segment_id"], "text": p["excerpt"]} for p in (packet or [])]
+    d["valid_evidence_ids"] = [p["segment_id"] for p in (packet or [])]
     return json.dumps(d, ensure_ascii=False)
+
+
+def build_memory_turn_for_summary(history_turn: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize dropped history so long-term memory can only ingest grounded state changes."""
+    return {
+        "turn": history_turn.get("turn"),
+        "player_action": history_turn.get("player_action", ""),
+        "action_evaluation": history_turn.get("action_evaluation", ""),
+        "grounded_observations": history_turn.get("grounded_observations", []),
+        "grounded_claims": history_turn.get("grounded_claims", []),
+        "location": history_turn.get("location", ""),
+        "time_of_day": history_turn.get("time_of_day", ""),
+    }
 
 def build_suggest_prompt(state: Dict[str, Any], packet: List[Dict[str, str]], n: int, era_config: Dict[str, Any]) -> str:
     d = copy.deepcopy(PROMPTS_DATA["suggest_prompt"])
@@ -1421,6 +1532,7 @@ def main() -> None:
                     if err:
                         plan_errs = [f"JSON parse error: {err}"]
                         continue
+                    sanitize_plan_evidence_ids(obj, packet_ids)
                     plan_errs = validate_plan(obj, packet_ids)
                     if plan_errs:
                         if args.debug: print(f"[DEBUG] Plan invalid (try {attempt}): {plan_errs}")
@@ -1514,6 +1626,7 @@ def main() -> None:
                         render_errs = [f"JSON parse error: {err}"]
                         continue
                     
+                    sanitize_render_evidence_ids(obj, packet_ids)
                     render_errs = validate_render(obj, packet, is_social)
                     
                     if not render_errs and args.strict_audit:
@@ -1554,11 +1667,32 @@ def main() -> None:
                 sensory = de_cliche_opening(render_obj["sensory_environment"], state["loc_label"], state["time_of_day"], state["weather"], prepend_context=True)
                 npc_lines = [de_cliche_opening(line, state["loc_label"], state["time_of_day"], state["weather"], prepend_context=False) for line in render_obj["npc_activity"]]
 
+                grounded_observations = []
+                for obs in render_obj.get("observations", []):
+                    if isinstance(obs, dict) and isinstance(obs.get("text"), str):
+                        grounded_observations.append({
+                            "text": obs["text"].strip(),
+                            "evidence_ids": obs.get("evidence_ids", []),
+                        })
+
+                grounded_claims = []
+                for claim in render_obj.get("claims", []):
+                    if isinstance(claim, dict) and isinstance(claim.get("claim"), str):
+                        grounded_claims.append({
+                            "claim": claim["claim"].strip(),
+                            "quote": claim.get("quote", ""),
+                            "evidence_ids": claim.get("evidence_ids", []),
+                        })
+
                 hist_entry = {
                     "turn": state["turn_index"],
                     "player_action": user_in,
                     "engine_narrative": sensory,
                     "action_evaluation": plan_obj.get("action_evaluation", "Success"),
+                    "grounded_observations": grounded_observations,
+                    "grounded_claims": grounded_claims,
+                    "location": state.get("loc_label", ""),
+                    "time_of_day": state.get("time_of_day", ""),
                 }
                 if render_obj.get("direct_dialogue"):
                     hist_entry["dialogue_spoken"] = render_obj["direct_dialogue"]
@@ -1567,7 +1701,8 @@ def main() -> None:
                 if len(history) == history.maxlen:
                     dropped_turn = history[0]
                     try:
-                        dropped_str = json.dumps(dropped_turn, ensure_ascii=False)
+                        dropped_memory_turn = build_memory_turn_for_summary(dropped_turn)
+                        dropped_str = json.dumps(dropped_memory_turn, ensure_ascii=False)
                         summary_prompt_text = PROMPTS_DATA["summarize_prompt"].replace("{dropped_turn}", dropped_str)
                         sum_msgs = [
                             {"role": "system", "content": "You are a concise narrative memory summarizer."},
