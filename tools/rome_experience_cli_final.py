@@ -199,7 +199,7 @@ META_ROLE_CUE_RE = re.compile(
 
 
 FORBIDDEN_OPPORTUNITY_RE = re.compile(
-    r"\b(?:hidden|secret|inscription|inscriptions|glyph|rune|omen|mystery|clue|symbolic|prophecy|sigil|whisper|conspiracy)\b",
+    r"\b(?:hidden|secret|inscription|inscriptions|glyph|rune|omen|mystery|clue|symbolic|prophecy|sigil|whisper|conspiracy|hidden\s+markings?|inspect\s+for\s+signs\s+of\s+wear|signs\s+of\s+wear)\b",
     re.IGNORECASE,
 )
 
@@ -207,6 +207,8 @@ WAIT_ACTION_RE = re.compile(r"^\s*(?:wait|stand by|hold position|remain at my po
 META_TRAVEL_RE = re.compile(r"^\s*(?:move to|go to|travel to|head to|relocate to)\b", re.IGNORECASE)
 OATH_ACTION_RE = re.compile(r"\b(?:oath|swear|renew\s+my\s+oath|take\s+the\s+oath)\b", re.IGNORECASE)
 PASSIVE_DUTY_RE = re.compile(r"\b(?:hold\s+the\s+line|remain\s+on\s+duty|stay\s+on\s+duty|stand\s+watch|keep\s+watch|maintain\s+post|await\s+orders)\b", re.IGNORECASE)
+PROCEDURAL_REPORT_RE = re.compile(r"\b(?:report\s+in|reporting\s+in|report\s+for\s+duty|acknowledge\s+orders|confirm\s+orders|standing\s+duty|on\s+duty)\b", re.IGNORECASE)
+META_ACCESS_RE = re.compile(r"\b(?:direct\s+access|direct\s+audience|audience\s+with|bypass\s+protocol|waive\s+protocol|grant\s+access)\b", re.IGNORECASE)
 
 CLICHE_OPENINGS = [
     r"^(the\s+morning\s+sun\s+\w+[^.]{0,60}[,.]?\s+)",
@@ -285,11 +287,38 @@ def extract_meta_role_text(user_text: str) -> str:
         return ""
 
     normalized = META_ROLE_PREFIX_RE.sub("", raw).strip()
-    role_text = normalized.lower()
-    role_text = re.sub(r"^\s*(?:change\s+role\s+to|switch\s+role\s+to|start\s+game\s+as|start\s+as|play\s+as|become|set\s+my\s+role\s+as|i\s+am\s+now)\s*", "", role_text, flags=re.IGNORECASE)
+    cue = re.search(r"(?:change\s+role\s+to|switch\s+role\s+to|start\s+game\s+as|start\s+as|play\s+as|become|set\s+my\s+role\s+as|i\s+am\s+now)\s*(.+)$", normalized, flags=re.IGNORECASE)
+    if cue:
+        role_text = cue.group(1).lower()
+    else:
+        # Keep non-role (meta) directives out of role/status labels.
+        return ""
     role_text = re.sub(r"^[^a-z0-9]+|[^a-z0-9\s,'-]+$", "", role_text).strip(" .")
     role_text = re.sub(r"\s+", " ", role_text).strip()
     return role_text
+
+
+def sanitize_status_label(status: str) -> str:
+    cleaned = META_ROLE_PREFIX_RE.sub("", status or "").strip()
+    cleaned = re.sub(r"\(meta\)", "", cleaned, flags=re.IGNORECASE).strip()
+    if META_ACCESS_RE.search(cleaned):
+        return ""
+    if len(cleaned) > 60:
+        cleaned = cleaned[:60].rstrip(" ,.-")
+    return cleaned
+
+
+def detect_meta_access_request(user_text: str) -> bool:
+    raw = (user_text or "").strip()
+    if not raw.lower().startswith("(meta)"):
+        return False
+    normalized = META_ROLE_PREFIX_RE.sub("", raw).strip().lower()
+    return bool(META_ACCESS_RE.search(normalized))
+
+
+def procedural_fast_path_requested(user_text: str) -> bool:
+    txt = user_text or ""
+    return bool(WAIT_ACTION_RE.match(txt) or PASSIVE_DUTY_RE.search(txt) or OATH_ACTION_RE.search(txt) or PROCEDURAL_REPORT_RE.search(txt))
 
 
 def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str) -> Optional[Dict[str, Any]]:
@@ -439,7 +468,13 @@ def infer_generic_meta_role(user_text: str, world: Dict[str, Any], active_era: s
 
 def build_passive_duty_fast_plan(user_text: str) -> Dict[str, Any]:
     is_oath = bool(OATH_ACTION_RE.search(user_text or ""))
-    beat = "You renew your duty oath with the others and return to routine post discipline." if is_oath else "You maintain passive duty posture and continue routine watch without incident."
+    is_reporting = bool(PROCEDURAL_REPORT_RE.search(user_text or ""))
+    if is_oath:
+        beat = "You renew your duty oath with the others and return to routine post discipline."
+    elif is_reporting:
+        beat = "You deliver a concise duty report, receive procedural acknowledgement, and resume assigned routine."
+    else:
+        beat = "You maintain passive duty posture and continue routine watch without incident."
     return {
         "action_evaluation": "Success",
         "narrative_beats": [{"beat": beat, "evidence_ids": []}],
@@ -460,9 +495,12 @@ def build_passive_duty_fast_plan(user_text: str) -> Dict[str, Any]:
 def build_passive_duty_fast_render(state: Dict[str, Any], user_text: str) -> Dict[str, Any]:
     loc = state.get("loc_label", "Current location")
     is_oath = bool(OATH_ACTION_RE.search(user_text or ""))
+    is_reporting = bool(PROCEDURAL_REPORT_RE.search(user_text or ""))
     sensory = f"{loc}." + (
         " The watch officer calls the roster, each name answers, and the oath is repeated in plain procedural language before routine duty resumes."
         if is_oath else
+        " You deliver your report in sequence, the officer acknowledges it without ceremony, and ordinary duty flow continues at the same post."
+        if is_reporting else
         " Routine watch continues in orderly sequence: checks are logged, orders are repeated, and your post remains unchanged."
     )
     return {
@@ -1107,7 +1145,7 @@ STYLE_CATEGORY_PATTERNS: Dict[str, List[str]] = {
         r"\bquest(?:s)?\b", r"\bmission\b", r"\bdestiny\b", r"\bfate\b", r"\bchosen\s+one\b", r"\bobjective\b", r"\bparty\b",
     ],
     "cryptic_npc_behavior": [
-        r"\bspeaks?\s+in\s+riddles?\b", r"\briddle\b", r"\benigmatic\b", r"\bknowing\s+smile\b", r"\bwon'?t\s+say\s+why\b",
+        r"\bspeaks?\s+in\s+riddles?\b", r"\briddle\b", r"\benigmatic\b", r"\bknowing\s+smile\b",
     ],
     "hidden_meaning_or_symbolism": [
         r"\bhidden\s+meaning\b", r"\bsymbolic\b", r"\ballegory\b", r"\bsecret\s+meaning\b", r"\bthe\s+city[’']s\s+hidden\s+rhythm\b", r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
@@ -1684,7 +1722,10 @@ def main() -> None:
 
             try:
                 inv_str = ", ".join(state.get("inventory", [])) if state.get("inventory") else "Empty"
-                stat_str = ", ".join(state.get("status_effects", [])) if state.get("status_effects") else "Normal"
+                clean_statuses = [sanitize_status_label(x) for x in state.get("status_effects", []) if isinstance(x, str)]
+                clean_statuses = [x for x in clean_statuses if x]
+                state["status_effects"] = clean_statuses
+                stat_str = ", ".join(clean_statuses) if clean_statuses else "Normal"
                 
                 print(f"\n[{state['loc_label']} | {state['time_of_day'].title()} | {state['weather'].title()} (Day {state['day']}) | Era: {state['era'].title()}]")
                 print(f"[Fatigue: {state['fatigue']}% | Inv: {clamp(inv_str, 40)} | Stat: {stat_str}]")
@@ -1848,6 +1889,8 @@ def main() -> None:
                 normalized_user_in = META_ROLE_PREFIX_RE.sub("", user_in).strip()
                 is_social = any(w in normalized_user_in.lower() for w in SOCIAL_VERBS)
                 role_rebase_applied = False
+                meta_access_requested = detect_meta_access_request(user_in)
+                use_passive_fast_path = procedural_fast_path_requested(normalized_user_in)
                 role_profile = detect_roleplay_start(user_in, world_config, state.get("era", ""))
                 if role_profile is None:
                     role_profile = infer_generic_meta_role(user_in, world_config, state.get("era", ""))
@@ -1861,9 +1904,11 @@ def main() -> None:
                     remove_items = [str(i).strip() for i in role_profile.get("inventory_remove", []) if str(i).strip()]
 
                     if role_name:
-                        state["status_effects"] = [s for s in state.get("status_effects", []) if isinstance(s, str) and not s.lower().startswith("role:")]
-                        state["status_effects"] = [s for s in state["status_effects"] if s != role_name]
-                        state["status_effects"].append(role_name)
+                        role_name = sanitize_status_label(role_name)
+                        if role_name:
+                            state["status_effects"] = [s for s in state.get("status_effects", []) if isinstance(s, str) and not s.lower().startswith("role:")]
+                            state["status_effects"] = [s for s in state["status_effects"] if s != role_name]
+                            state["status_effects"].append(role_name)
 
                     state["loc_label"] = spawn_location.title()
                     state["loc_id"] = None
@@ -1895,6 +1940,15 @@ def main() -> None:
                         f"Canonical location is now {state['loc_label']}. Treat this as an immediate continuity rebasing. "
                         "Do not narrate travel from the previous role/location unless explicitly requested by the player. "
                         "Render the new role's local scene with grounded mundane details only."
+                    )
+
+                if meta_access_requested:
+                    if "direct audience" not in state["status_effects"]:
+                        state["status_effects"].append("direct audience")
+                    state["npcs_present"] = state.get("npcs_present", []) or ["duty official"]
+                    system_constraint = (system_constraint + " " if system_constraint else "") + (
+                        "META ACCESS REQUEST APPLIED: place the player directly before the relevant official now. "
+                        "Permit ordinary interaction immediately in a procedurally plausible Roman setting without fantasy framing."
                     )
                 
                 # --- 1. Dynamic City-Scale Spatial Navigation ---
@@ -1994,35 +2048,35 @@ def main() -> None:
                     print(f"[DEBUG Engine Constraint] {system_constraint}")
 
                 # --- 2. Evidence Retrieval ---
-                packet, meta = retrieve_packet_with_quotas(
-                    store=store,
-                    user_text=user_in,
-                    state=state,
-                    corpora_filter=args.corpus,
-                    cooldown_set=cooldown_set,
-                    world=world_config,
-                    era_config=era_config,
-                    debug=args.debug,
-                    diag=diag,
-                    vec_enabled=args.enable_vector,
-                    vec_base_url=args.vec_base_url,
-                    vec_model=args.vec_model,
-                    vec_api_key=args.api_key,
-                    embedding_timeout_s=args.embedding_timeout
-                )
+                if use_passive_fast_path:
+                    packet = []
+                    meta = {"scope": state.get("scope", "local"), "passive_fast_path": True}
+                else:
+                    packet, meta = retrieve_packet_with_quotas(
+                        store=store,
+                        user_text=user_in,
+                        state=state,
+                        corpora_filter=args.corpus,
+                        cooldown_set=cooldown_set,
+                        world=world_config,
+                        era_config=era_config,
+                        debug=args.debug,
+                        diag=diag,
+                        vec_enabled=args.enable_vector,
+                        vec_base_url=args.vec_base_url,
+                        vec_model=args.vec_model,
+                        vec_api_key=args.api_key,
+                        embedding_timeout_s=args.embedding_timeout
+                    )
 
-                if not packet:
-                    print("[WARN] No evidence returned. Try a more specific prompt or use :place / :goto.")
-                    state = state_snapshot # ROLLBACK
-                    continue
+                    if not packet:
+                        print("[WARN] No evidence returned. Try a more specific prompt or use :place / :goto.")
+                        state = state_snapshot # ROLLBACK
+                        continue
 
-                last_packet = packet
+                    last_packet = packet
                 packet_ids = {e["segment_id"] for e in packet}
 
-                is_waiting_action = bool(WAIT_ACTION_RE.match(normalized_user_in))
-                is_passive_duty_action = bool(PASSIVE_DUTY_RE.search(normalized_user_in))
-                is_oath_action = bool(OATH_ACTION_RE.search(normalized_user_in))
-                use_passive_fast_path = is_waiting_action or is_passive_duty_action or is_oath_action
                 if state["turn_index"] > 0 and state["turn_index"] % 5 == 0 and packet and not use_passive_fast_path and not role_rebase_applied:
                     event_seed = random.choice(packet)
                     system_constraint += f" DYNAMIC WORLD EVENT: Organically weave this specific historical detail into the background as an active, spontaneous event the player witnesses right now: '{clamp(event_seed.get('excerpt',''), 300)}'."
@@ -2098,8 +2152,9 @@ def main() -> None:
                 if "status_add" in delta and isinstance(delta["status_add"], list):
                     for status in delta["status_add"]:
                         if isinstance(status, str) and status.strip().lower() not in invalid_items:
-                            if status.strip() not in state["status_effects"]:
-                                state["status_effects"].append(status.strip())
+                            clean_status = sanitize_status_label(status.strip())
+                            if clean_status and clean_status not in state["status_effects"]:
+                                state["status_effects"].append(clean_status)
 
                 if "status_remove" in delta and isinstance(delta["status_remove"], list):
                     for status in delta["status_remove"]:
