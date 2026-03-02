@@ -174,7 +174,7 @@ STOPWORDS = {
     "is", "are", "was", "were", "what", "where", "how", "tell", "about", "then", "now"
 }
 
-SOCIAL_VERBS = {"talk", "speak", "ask", "tell", "say", "greet", "buy", "sell", "listen", "hear", "haggle", "argue", "discuss", "trade"}
+SOCIAL_VERBS = {"talk", "speak", "ask", "tell", "say", "greet", "buy", "sell", "listen", "hear", "haggle", "argue", "discuss", "trade", "gossip", "chat", "negotiate"}
 
 GENERIC_TOUR_RE = re.compile(
     r"^(show me around|show me the city|give me a tour|walk me around|take me around|tour|around|look|explore|wait|stay|continue|walk|wander|roam)\.?$",
