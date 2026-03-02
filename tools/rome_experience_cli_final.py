@@ -191,6 +191,12 @@ GENERIC_MOVE_RE = re.compile(
     re.IGNORECASE
 )
 
+META_ROLE_PREFIX_RE = re.compile(r"^\s*\(meta\)\s*", re.IGNORECASE)
+META_ROLE_CUE_RE = re.compile(
+    r"\b(?:start\s+game\s+as|start\s+as|play\s+as|become|i\s+am\s+now|set\s+my\s+role\s+as)\b",
+    re.IGNORECASE,
+)
+
 CLICHE_OPENINGS = [
     r"^(the\s+morning\s+sun\s+\w+[^.]{0,60}[,.]?\s+)",
     r"^(the\s+(morning|afternoon|evening|dawn|noon)\s+sun\s+)",
@@ -260,6 +266,41 @@ def minutes_to_time_of_day(minutes: int) -> str:
     if m < 1080: return "afternoon"
     if m < 1200: return "evening"
     return "night"
+
+
+def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str) -> Optional[Dict[str, Any]]:
+    raw = (user_text or "").strip()
+    if not raw:
+        return None
+
+    normalized = META_ROLE_PREFIX_RE.sub("", raw).strip()
+    lowered = normalized.lower()
+    if not (raw.lower().startswith("(meta)") or META_ROLE_CUE_RE.search(lowered)):
+        return None
+
+    profiles = world.get("roleplay_starts", [])
+    if not isinstance(profiles, list):
+        return None
+
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        allowed_eras = profile.get("era_unlocked")
+        if isinstance(allowed_eras, list) and allowed_eras and active_era not in allowed_eras:
+            continue
+
+        triggers = [str(t).lower().strip() for t in profile.get("triggers", []) if isinstance(t, str) and t.strip()]
+        if not triggers:
+            continue
+
+        score = sum(1 for t in triggers if t in lowered)
+        if score > best_score:
+            best = profile
+            best_score = score
+
+    return best if best and best_score > 0 else None
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0 
@@ -1550,6 +1591,51 @@ def main() -> None:
                 system_constraint = ""
                 pre_applied_time = 0
                 is_social = any(w in user_in.lower() for w in SOCIAL_VERBS)
+                role_profile = detect_roleplay_start(user_in, world_config, state.get("era", ""))
+
+                if role_profile:
+                    role_name = str(role_profile.get("status", "")).strip()
+                    spawn_location = str(role_profile.get("spawn_location", "")).strip() or state["loc_label"]
+                    spawn_npcs = [str(n).strip() for n in role_profile.get("npcs_present", []) if str(n).strip()]
+                    add_items = [str(i).strip() for i in role_profile.get("inventory_add", []) if str(i).strip()]
+                    remove_items = [str(i).strip() for i in role_profile.get("inventory_remove", []) if str(i).strip()]
+
+                    if role_name:
+                        state["status_effects"] = [s for s in state.get("status_effects", []) if isinstance(s, str) and not s.lower().startswith("role:")]
+                        state["status_effects"] = [s for s in state["status_effects"] if s != role_name]
+                        state["status_effects"].append(role_name)
+
+                    state["loc_label"] = spawn_location.title()
+                    state["loc_id"] = None
+                    state["coords"] = None
+                    if spawn_npcs:
+                        state["npcs_present"] = spawn_npcs[:5]
+                    else:
+                        state["npcs_present"] = []
+
+                    for item in remove_items:
+                        if item in state["inventory"]:
+                            state["inventory"].remove(item)
+                    for item in add_items:
+                        if item not in state["inventory"]:
+                            state["inventory"].append(item)
+
+                    fatigue_floor = role_profile.get("fatigue_floor")
+                    if isinstance(fatigue_floor, int):
+                        state["fatigue"] = max(fatigue_floor, state.get("fatigue", 0))
+
+                    note = str(role_profile.get("world_note", "")).strip()
+                    if note and note not in state["world_notes"]:
+                        if len(state["world_notes"]) >= 15:
+                            state["world_notes"].pop(0)
+                        state["world_notes"].append(note)
+
+                    system_constraint = (
+                        f"META ROLE SWITCH APPLIED: player role is now '{role_name or 'custom role'}'. "
+                        f"Canonical location is now {state['loc_label']}. Treat this as an immediate continuity rebasing. "
+                        "Do not narrate travel from the previous role/location unless explicitly requested by the player. "
+                        "Render the new role's local scene with grounded mundane details only."
+                    )
                 
                 # --- 1. Dynamic City-Scale Spatial Navigation ---
                 diag.start("Graph_Navigation")
