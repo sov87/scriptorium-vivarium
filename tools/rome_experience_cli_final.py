@@ -799,6 +799,12 @@ FANTASY_BANNED_PATTERNS = [
     r"\bprophe(?:cy|sied|sized)\b",
     r"\bglowing\s+(?:sigil|seal|thread|glyph)s?\b",
     r"\barcane\b",
+    r"\bhidden\s+rhythm\b",
+    r"\bsilence\s+between\b",
+    r"\blaw\s+breathes?\b",
+    r"\bcharged\s+with\s+the\s+weight\s+of\s+unspoken\s+knowledge\b",
+    r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
+    r"\bthe\s+city[’']s\s+hidden\s+rhythm\b",
 ]
 
 
@@ -816,6 +822,58 @@ def validate_evidence_ids(evs: Any, packet_ids: Set[str]) -> Optional[str]:
     bad = [x for x in evs if x not in packet_ids]
     if bad: return f"unknown evidence_ids {bad[:4]}"
     return None
+
+
+
+def sanitize_evidence_ids_list(evs: Any, packet_ids: Set[str]) -> List[str]:
+    if not isinstance(evs, list):
+        return []
+    cleaned: List[str] = []
+    for x in evs:
+        if isinstance(x, str) and x in packet_ids and x not in cleaned:
+            cleaned.append(x)
+    return cleaned
+
+
+def sanitize_plan_evidence_ids(obj: Any, packet_ids: Set[str]) -> None:
+    if not isinstance(obj, dict):
+        return
+    beats = obj.get("narrative_beats")
+    if isinstance(beats, list):
+        for it in beats:
+            if isinstance(it, dict):
+                it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+    delta = obj.get("state_delta")
+    if isinstance(delta, dict):
+        changes = delta.get("narrative_changes")
+        if isinstance(changes, list):
+            for it in changes:
+                if isinstance(it, dict):
+                    it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+
+def sanitize_render_evidence_ids(obj: Any, packet_ids: Set[str]) -> None:
+    if not isinstance(obj, dict):
+        return
+
+    obs = obj.get("observations")
+    if isinstance(obs, list):
+        for it in obs:
+            if isinstance(it, dict):
+                it["evidence_ids"] = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+
+    claims = obj.get("claims")
+    if isinstance(claims, list):
+        cleaned_claims: List[Dict[str, Any]] = []
+        for it in claims:
+            if not isinstance(it, dict):
+                continue
+            cleaned_ids = sanitize_evidence_ids_list(it.get("evidence_ids"), packet_ids)
+            it["evidence_ids"] = cleaned_ids
+            if cleaned_ids:
+                cleaned_claims.append(it)
+        obj["claims"] = cleaned_claims
 
 def validate_plan(obj: Any, packet_ids: Set[str]) -> List[str]:
     e: List[str] = []
@@ -902,10 +960,20 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
         e.append("direct_dialogue must be a list (can be empty, up to 15 items)")
     elif is_social and len(dd) == 0:
         e.append("MECHANICAL DIALOGUE GATE: User intent was social ('talk', 'ask'). You MUST provide 'direct_dialogue'.")
+    else:
+        dialogue_text = " ".join(x for x in dd if isinstance(x, str))
+        fantasy_hits = find_banned_fantasy_terms(dialogue_text)
+        if fantasy_hits:
+            e.append(f"direct_dialogue contains prohibited metaphysical language: {fantasy_hits[:3]}")
 
     io = obj.get("interactive_opportunities")
     if not isinstance(io, list) or not (1 <= len(io) <= 6):
         e.append("interactive_opportunities must be list len 1-6")
+    else:
+        io_text = " ".join(x for x in io if isinstance(x, str))
+        fantasy_hits = find_banned_fantasy_terms(io_text)
+        if fantasy_hits:
+            e.append(f"interactive_opportunities contains prohibited metaphysical language: {fantasy_hits[:3]}")
 
     na = obj.get("npc_activity")
     if not isinstance(na, list) or not (2 <= len(na) <= 12):
@@ -1464,6 +1532,7 @@ def main() -> None:
                     if err:
                         plan_errs = [f"JSON parse error: {err}"]
                         continue
+                    sanitize_plan_evidence_ids(obj, packet_ids)
                     plan_errs = validate_plan(obj, packet_ids)
                     if plan_errs:
                         if args.debug: print(f"[DEBUG] Plan invalid (try {attempt}): {plan_errs}")
@@ -1557,6 +1626,7 @@ def main() -> None:
                         render_errs = [f"JSON parse error: {err}"]
                         continue
                     
+                    sanitize_render_evidence_ids(obj, packet_ids)
                     render_errs = validate_render(obj, packet, is_social)
                     
                     if not render_errs and args.strict_audit:
