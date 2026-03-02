@@ -662,19 +662,18 @@
       },
       "roleplay_starts": [
         {
-          "id": "praetorian_tiberius",
-          "label": "Praetorian Guard (personal detail, Tiberius)",
+          "id": "praetorian_guard_detail",
+          "label": "Praetorian Guard Detail",
           "triggers": [
             "praetorian",
             "guard",
-            "tiberius",
             "personal guard",
             "castra praetoria"
           ],
           "era_unlocked": [
             "augustan"
           ],
-          "status": "Praetorian Guard (personal detail, Tiberius)",
+          "status": "Praetorian Guard Detail",
           "spawn_location": "Castra Praetoria",
           "npcs_present": [
             "Centurion Lucius Valerius",
@@ -687,7 +686,7 @@
           ],
           "inventory_remove": [],
           "fatigue_floor": 1,
-          "world_note": "Role profile active: Praetorian guard assigned to Tiberius detail."
+          "world_note": "Role profile active: praetorian guard detail assignment."
         },
         {
           "id": "merchant_macellum",

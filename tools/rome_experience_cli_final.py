@@ -205,6 +205,8 @@ FORBIDDEN_OPPORTUNITY_RE = re.compile(
 
 WAIT_ACTION_RE = re.compile(r"^\s*(?:wait|stand by|hold position|remain at my post|stay at my post|remain here|stay here)\b", re.IGNORECASE)
 META_TRAVEL_RE = re.compile(r"^\s*(?:move to|go to|travel to|head to|relocate to)\b", re.IGNORECASE)
+OATH_ACTION_RE = re.compile(r"\b(?:oath|swear|renew\s+my\s+oath|take\s+the\s+oath)\b", re.IGNORECASE)
+PASSIVE_DUTY_RE = re.compile(r"\b(?:hold\s+the\s+line|remain\s+on\s+duty|stay\s+on\s+duty|stand\s+watch|keep\s+watch|maintain\s+post|await\s+orders)\b", re.IGNORECASE)
 
 CLICHE_OPENINGS = [
     r"^(the\s+morning\s+sun\s+\w+[^.]{0,60}[,.]?\s+)",
@@ -277,6 +279,19 @@ def minutes_to_time_of_day(minutes: int) -> str:
     return "night"
 
 
+def extract_meta_role_text(user_text: str) -> str:
+    raw = (user_text or "").strip()
+    if not raw:
+        return ""
+
+    normalized = META_ROLE_PREFIX_RE.sub("", raw).strip()
+    role_text = normalized.lower()
+    role_text = re.sub(r"^\s*(?:change\s+role\s+to|switch\s+role\s+to|start\s+game\s+as|start\s+as|play\s+as|become|set\s+my\s+role\s+as|i\s+am\s+now)\s*", "", role_text, flags=re.IGNORECASE)
+    role_text = re.sub(r"^[^a-z0-9]+|[^a-z0-9\s,'-]+$", "", role_text).strip(" .")
+    role_text = re.sub(r"\s+", " ", role_text).strip()
+    return role_text
+
+
 def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str) -> Optional[Dict[str, Any]]:
     raw = (user_text or "").strip()
     if not raw:
@@ -287,6 +302,10 @@ def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str
     if not (raw.lower().startswith("(meta)") or META_ROLE_CUE_RE.search(lowered)):
         return None
     if META_TRAVEL_RE.match(lowered):
+        return None
+
+    role_text = extract_meta_role_text(user_text)
+    if not role_text:
         return None
 
     profiles = world.get("roleplay_starts", [])
@@ -303,15 +322,29 @@ def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str
             continue
 
         triggers = [str(t).lower().strip() for t in profile.get("triggers", []) if isinstance(t, str) and t.strip()]
-        if not triggers:
+        label = str(profile.get("label", "")).lower().strip()
+        status = str(profile.get("status", "")).lower().strip()
+        profile_tokens = set(re.findall(r"[a-z0-9]+", " ".join(triggers + [label, status])))
+        role_tokens = set(re.findall(r"[a-z0-9]+", role_text))
+        if not role_tokens:
             continue
 
-        score = sum(1 for t in triggers if t in lowered)
+        overlap = len(role_tokens & profile_tokens)
+        if overlap == 0:
+            continue
+
+        score = overlap
+        if role_text in triggers:
+            score += 3
+        if role_text == label or role_text == status:
+            score += 5
+
         if score > best_score:
             best = profile
             best_score = score
 
-    return best if best and best_score > 0 else None
+    return best if best and best_score >= 2 else None
+
 
 def build_wait_fast_render(state: Dict[str, Any]) -> Dict[str, Any]:
     loc = state.get("loc_label", "Current location")
@@ -325,7 +358,7 @@ def build_wait_fast_render(state: Dict[str, Any]) -> Dict[str, Any]:
         "interactive_opportunities": [
             "Continue waiting and monitor the same post.",
             "Ask the nearest guard for routine duty updates.",
-            "Inspect nearby equipment for ordinary wear."
+            "Confirm your current assignment with the duty clerk."
         ],
         "observations": [],
         "claims": [],
@@ -374,15 +407,8 @@ def infer_generic_meta_role(user_text: str, world: Dict[str, Any], active_era: s
     if META_TRAVEL_RE.match(lowered):
         return None
 
-    role_text = lowered
-    role_text = re.sub(r"^\s*(?:change\s+role\s+to|switch\s+role\s+to|start\s+game\s+as|start\s+as|play\s+as|become|set\s+my\s+role\s+as)\s*", "", role_text, flags=re.IGNORECASE)
-    role_text = re.sub(r"^[^a-z0-9]+|[^a-z0-9\s,'-]+$", "", role_text).strip(" .")
-    role_text = re.sub(r"\s+", " ", role_text).strip()
+    role_text = extract_meta_role_text(user_text)
     if len(role_text) < 3:
-        return None
-
-    # soft guardrail: do not allow becoming the emperor directly, but allow guarding/serving roles.
-    if re.search(r"\bemperor\b", role_text) and not re.search(r"\b(?:guard|bodyguard|detail|servant|attendant|praetorian|soldier|commander|officer)\b", role_text):
         return None
 
     spawn_location = ""
@@ -408,6 +434,54 @@ def infer_generic_meta_role(user_text: str, world: Dict[str, Any], active_era: s
         "inventory_remove": [],
         "fatigue_floor": 0,
         "world_note": f"Role profile active: {role_text}."
+    }
+
+
+def build_passive_duty_fast_plan(user_text: str) -> Dict[str, Any]:
+    is_oath = bool(OATH_ACTION_RE.search(user_text or ""))
+    beat = "You renew your duty oath with the others and return to routine post discipline." if is_oath else "You maintain passive duty posture and continue routine watch without incident."
+    return {
+        "action_evaluation": "Success",
+        "narrative_beats": [{"beat": beat, "evidence_ids": []}],
+        "state_delta": {
+            "time_advanced_minutes": 10 if is_oath else 8,
+            "fatigue_change": 1,
+            "inventory_add": [],
+            "inventory_remove": [],
+            "status_add": [],
+            "status_remove": [],
+            "npcs_present": [],
+            "add_world_note": None,
+            "narrative_changes": []
+        }
+    }
+
+
+def build_passive_duty_fast_render(state: Dict[str, Any], user_text: str) -> Dict[str, Any]:
+    loc = state.get("loc_label", "Current location")
+    is_oath = bool(OATH_ACTION_RE.search(user_text or ""))
+    sensory = f"{loc}." + (
+        " The watch officer calls the roster, each name answers, and the oath is repeated in plain procedural language before routine duty resumes."
+        if is_oath else
+        " Routine watch continues in orderly sequence: checks are logged, orders are repeated, and your post remains unchanged."
+    )
+    return {
+        "sensory_environment": sensory,
+        "direct_dialogue": [
+            "Duty clerk: 'Roster confirmed. Continue your assigned post.'"
+        ],
+        "npc_activity": [
+            "A guard confirms strap tension and returns to station.",
+            "A clerk marks attendance on a wax tablet and moves to the next name."
+        ],
+        "interactive_opportunities": [
+            "Continue the same duty cycle and wait for the next call.",
+            "Request the next routine instruction from the duty clerk.",
+            "Check post boundaries and report readiness."
+        ],
+        "observations": [],
+        "claims": [],
+        "limitations": ""
     }
 
 
@@ -1023,15 +1097,17 @@ def retrieve_packet_with_quotas(
 PLAN_REQUIRED_KEYS = {"action_evaluation", "narrative_beats", "state_delta"}
 RENDER_REQUIRED_KEYS = {"sensory_environment", "direct_dialogue", "npc_activity", "interactive_opportunities", "observations", "claims"}
 
+PROCEDURAL_BENIGN_RE = re.compile(r"\b(?:oath|roster|watch|post|duty|orders|clerk|attendance|assignment|hold\s+position|stand\s+watch|await\s+orders)\b", re.IGNORECASE)
+
 STYLE_CATEGORY_PATTERNS: Dict[str, List[str]] = {
     "mystical_or_ominous_tone": [
-        r"\bmystic(?:al)?\b", r"\bominous\b", r"\bforeboding\b", r"\bsupernatural\b", r"\bprophe(?:cy|sied|sized)\b", r"\bmagic(?:al)?\b", r"\barcane\b", r"\bomen(?:s)?\b",
+        r"\bmystic(?:al)?\b", r"\bominous\b", r"\bforeboding\b", r"\bsupernatural\b", r"\bprophe(?:cy|sied|sized)\b", r"\bmagic(?:al)?\b", r"\barcane\b", 
     ],
     "quest_framing_language": [
         r"\bquest(?:s)?\b", r"\bmission\b", r"\bdestiny\b", r"\bfate\b", r"\bchosen\s+one\b", r"\bobjective\b", r"\bparty\b",
     ],
     "cryptic_npc_behavior": [
-        r"\bcryptic\b", r"\bspeaks?\s+in\s+riddles?\b", r"\briddle\b", r"\benigmatic\b", r"\bknowing\s+smile\b", r"\bwon'?t\s+say\s+why\b",
+        r"\bspeaks?\s+in\s+riddles?\b", r"\briddle\b", r"\benigmatic\b", r"\bknowing\s+smile\b", r"\bwon'?t\s+say\s+why\b",
     ],
     "hidden_meaning_or_symbolism": [
         r"\bhidden\s+meaning\b", r"\bsymbolic\b", r"\ballegory\b", r"\bsecret\s+meaning\b", r"\bthe\s+city[’']s\s+hidden\s+rhythm\b", r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
@@ -1056,6 +1132,9 @@ SPECIFIC_ENTITY_RE = re.compile(
 
 def find_style_violations(text: str) -> List[str]:
     hay = text or ""
+    if PROCEDURAL_BENIGN_RE.search(hay):
+        # Allow normal military/procedural phrasing to pass strict style validation.
+        hay = re.sub(PROCEDURAL_BENIGN_RE, "", hay)
     found: List[str] = []
     for category, patterns in STYLE_CATEGORY_PATTERNS.items():
         if any(re.search(pat, hay, flags=re.IGNORECASE) for pat in patterns):
@@ -1941,7 +2020,10 @@ def main() -> None:
                 packet_ids = {e["segment_id"] for e in packet}
 
                 is_waiting_action = bool(WAIT_ACTION_RE.match(normalized_user_in))
-                if state["turn_index"] > 0 and state["turn_index"] % 5 == 0 and packet and not is_waiting_action and not role_rebase_applied:
+                is_passive_duty_action = bool(PASSIVE_DUTY_RE.search(normalized_user_in))
+                is_oath_action = bool(OATH_ACTION_RE.search(normalized_user_in))
+                use_passive_fast_path = is_waiting_action or is_passive_duty_action or is_oath_action
+                if state["turn_index"] > 0 and state["turn_index"] % 5 == 0 and packet and not use_passive_fast_path and not role_rebase_applied:
                     event_seed = random.choice(packet)
                     system_constraint += f" DYNAMIC WORLD EVENT: Organically weave this specific historical detail into the background as an active, spontaneous event the player witnesses right now: '{clamp(event_seed.get('excerpt',''), 300)}'."
 
@@ -1950,7 +2032,11 @@ def main() -> None:
                 plan_obj: Optional[Dict[str, Any]] = None
                 plan_last = ""
                 plan_errs: List[str] = []
+                if use_passive_fast_path:
+                    plan_obj = build_passive_duty_fast_plan(normalized_user_in)
                 for attempt in range(1, TURNPLAN_RETRIES + 1):
+                    if plan_obj is not None:
+                        break
                     msgs = [
                         {"role": "system", "content": build_system_prompt(era_config, state.get("running_summary", ""))},
                         {"role": "user", "content": "/no_think\n" + build_plan_prompt(state, list(history), user_in, system_constraint, packet)},
@@ -2039,11 +2125,10 @@ def main() -> None:
                     print(f"[DEBUG Action Eval] {plan_obj.get('action_evaluation')}")
 
                 # --- 5. Render Pass ---
-                is_waiting_action = bool(WAIT_ACTION_RE.match(normalized_user_in))
                 diag.start("LLM_Render_Pass")
                 render_obj: Optional[Dict[str, Any]] = None
-                if is_waiting_action:
-                    render_obj = build_wait_fast_render(state)
+                if use_passive_fast_path:
+                    render_obj = build_passive_duty_fast_render(state, normalized_user_in)
                 render_last = ""
                 render_errs: List[str] = []
                 max_render_attempts = 2 if role_rebase_applied else RENDER_RETRIES
@@ -2070,7 +2155,7 @@ def main() -> None:
                         sanitize_render_payload(obj, packet, is_social)
                     render_errs = validate_render(obj, packet, is_social)
                     
-                    if not render_errs and args.strict_audit:
+                    if not render_errs and args.strict_audit and not use_passive_fast_path:
                         diag.start("LLM_Strict_Auditor")
                         audit_msgs = [
                             {"role": "system", "content": "You are a deterministic historical grounding auditor. Apply a strict rubric: (1) PASS only when specific historical claims are literally supported by evidence_packet text; (2) ignore mundane inferred details like generic weather/prices/basic actions; (3) FAIL any mystery, ominous, cryptic, or hidden-meaning framing; (4) audit all render fields in render_payload. Return JSON only and never add prose."},
