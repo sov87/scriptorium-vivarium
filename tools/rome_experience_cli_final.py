@@ -576,7 +576,14 @@ def title_match_confidence(target: str, title: str) -> float:
 # =============================================================================
 
 def openai_chat(
-    base_url: str, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int, api_key: str, retries: int = 4
+    base_url: str,
+    model: str,
+    messages: List[Dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+    api_key: str,
+    retries: int = 4,
+    timeout_s: float = 20.0,
 ) -> str:
     url = base_url.rstrip("/") + "/chat/completions"
     payload = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
@@ -590,7 +597,7 @@ def openai_chat(
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Bearer {api_key}")
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 last_raw = raw
         except urllib.error.URLError as e:
@@ -614,7 +621,7 @@ def openai_chat(
 
     raise RuntimeError(f"LLM request failed after retries. LastErr={last_err}. Raw(trunc)={clamp(last_raw or '', 900)}")
 
-def openai_embedding(base_url: str, model: str, text: str, api_key: str) -> List[float]:
+def openai_embedding(base_url: str, model: str, text: str, api_key: str, timeout_s: float = 20.0) -> List[float]:
     url = base_url.rstrip("/") + "/embeddings"
     payload = {"model": model, "input": text}
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -624,7 +631,7 @@ def openai_embedding(base_url: str, model: str, text: str, api_key: str) -> List
     req.add_header("Authorization", f"Bearer {api_key}")
     
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             j = json.loads(raw)
             return j["data"][0]["embedding"]
@@ -681,7 +688,8 @@ def retrieve_packet_with_quotas(
     vec_enabled: bool = False,
     vec_base_url: str = "",
     vec_model: str = "",
-    vec_api_key: str = ""
+    vec_api_key: str = "",
+    embedding_timeout_s: float = 20.0
 ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     
     scope = state.get("scope", "local")
@@ -738,7 +746,7 @@ def retrieve_packet_with_quotas(
     if vec_enabled and vec_model:
         diag.start("Retrieval_Vector")
         vec_query = f"{user_text} in {loc_label} during {time_of_day} weather {weather}"
-        query_emb = openai_embedding(vec_base_url, vec_model, vec_query, vec_api_key)
+        query_emb = openai_embedding(vec_base_url, vec_model, vec_query, vec_api_key, timeout_s=embedding_timeout_s)
         if query_emb:
             vec_limit = 20 if is_social else 10
             vec_hits = store.search_vector(query_emb, corpora_filter if corpora_filter else None, limit=vec_limit)
@@ -799,31 +807,54 @@ def retrieve_packet_with_quotas(
 PLAN_REQUIRED_KEYS = {"action_evaluation", "narrative_beats", "state_delta"}
 RENDER_REQUIRED_KEYS = {"sensory_environment", "direct_dialogue", "npc_activity", "interactive_opportunities", "observations", "claims"}
 
-FANTASY_BANNED_PATTERNS = [
-    r"\bmagic(?:al)?\b",
-    r"\bmystic(?:al)?\b",
-    r"\bspell(?:s)?\b",
-    r"\benchant(?:ed|ment)?\b",
-    r"\brune(?:s)?\b",
-    r"\bprophe(?:cy|sied|sized)\b",
-    r"\bglowing\s+(?:sigil|seal|thread|glyph)s?\b",
-    r"\barcane\b",
-    r"\bhidden\s+rhythm\b",
-    r"\bsilence\s+between\b",
-    r"\blaw\s+breathes?\b",
-    r"\bcharged\s+with\s+the\s+weight\s+of\s+unspoken\s+knowledge\b",
-    r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
-    r"\bthe\s+city[’']s\s+hidden\s+rhythm\b",
-]
+STYLE_CATEGORY_PATTERNS: Dict[str, List[str]] = {
+    "mystical_or_ominous_tone": [
+        r"\bmystic(?:al)?\b", r"\bominous\b", r"\bforeboding\b", r"\bsupernatural\b", r"\bprophe(?:cy|sied|sized)\b", r"\bmagic(?:al)?\b", r"\barcane\b", r"\bomen(?:s)?\b",
+    ],
+    "quest_framing_language": [
+        r"\bquest(?:s)?\b", r"\bmission\b", r"\bdestiny\b", r"\bfate\b", r"\bchosen\s+one\b", r"\bobjective\b", r"\bparty\b",
+    ],
+    "cryptic_npc_behavior": [
+        r"\bcryptic\b", r"\bspeaks?\s+in\s+riddles?\b", r"\briddle\b", r"\benigmatic\b", r"\bknowing\s+smile\b", r"\bwon'?t\s+say\s+why\b",
+    ],
+    "hidden_meaning_or_symbolism": [
+        r"\bhidden\s+meaning\b", r"\bsymbolic\b", r"\ballegory\b", r"\bsecret\s+meaning\b", r"\bthe\s+city[’']s\s+hidden\s+rhythm\b", r"\bpath\s+is\s+not\s+carved\.\s*it\s+is\s+remembered\b",
+    ],
+}
+
+SPECIFIC_CLAIM_HINT_RE = re.compile(
+    r"(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b|\b\d{2,4}\b|\bcentury\b|\bemperor\b|\bdynasty\b|\bforum\b|\bcolosseum\b|\btemple\b|\bbasilica\b|\baqueduct\b|\bconstructed\b|\bbuilt\b|\binvented\b|\btechnology\b)",
+    re.IGNORECASE,
+)
 
 
-def find_banned_fantasy_terms(text: str) -> List[str]:
+def find_style_violations(text: str) -> List[str]:
+    hay = text or ""
     found: List[str] = []
-    hay = (text or "").lower()
-    for pat in FANTASY_BANNED_PATTERNS:
-        if re.search(pat, hay, flags=re.IGNORECASE):
-            found.append(pat)
+    for category, patterns in STYLE_CATEGORY_PATTERNS.items():
+        if any(re.search(pat, hay, flags=re.IGNORECASE) for pat in patterns):
+            found.append(category)
     return found
+
+
+def sentence_split(text: str) -> List[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
+
+
+def sentence_has_specific_claim(sentence: str) -> bool:
+    return bool(SPECIFIC_CLAIM_HINT_RE.search(sentence or ""))
+
+
+def literal_quote_supported(quote: str, evidence_ids: List[str], packet_map: Dict[str, str]) -> bool:
+    if not isinstance(quote, str) or len(quote.strip()) < 3:
+        return False
+    quote_clean = clean_for_match(quote)
+    for sid in evidence_ids:
+        full_text_clean = clean_for_match(packet_map.get(sid, ""))
+        if quote_clean in full_text_clean:
+            return True
+    return False
+
 
 def validate_evidence_ids(evs: Any, packet_ids: Set[str]) -> Optional[str]:
     if not isinstance(evs, list): return "evidence_ids must be a list"
@@ -946,7 +977,7 @@ def validate_plan(obj: Any, packet_ids: Set[str]) -> List[str]:
 def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> List[str]:
     e: List[str] = []
     if not isinstance(obj, dict): return ["render not an object"]
-    
+
     packet_map = {item["segment_id"]: item.get("full_text", item.get("excerpt", "")) for item in packet}
     packet_ids = set(packet_map.keys())
 
@@ -960,9 +991,12 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
     if not isinstance(se, str) or len(se.strip()) < 50:
         e.append("sensory_environment too short or invalid")
     else:
-        fantasy_hits = find_banned_fantasy_terms(se)
-        if fantasy_hits:
-            e.append(f"sensory_environment contains fantasy-only language prohibited by simulation constraints: {fantasy_hits[:3]}")
+        style_hits = find_style_violations(se)
+        if style_hits:
+            e.append(f"sensory_environment contains forbidden style categories: {style_hits[:3]}")
+        for si, sent in enumerate(sentence_split(se)):
+            if sentence_has_specific_claim(sent) and not any(clean_for_match(sent) in clean_for_match(v) for v in packet_map.values()):
+                e.append(f"sensory_environment sentence[{si}] claims specifics without literal evidence support")
 
     dd = obj.get("direct_dialogue")
     if not isinstance(dd, list) or len(dd) > 15:
@@ -971,63 +1005,65 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
         e.append("MECHANICAL DIALOGUE GATE: User intent was social ('talk', 'ask'). You MUST provide 'direct_dialogue'.")
     else:
         dialogue_text = " ".join(x for x in dd if isinstance(x, str))
-        fantasy_hits = find_banned_fantasy_terms(dialogue_text)
-        if fantasy_hits:
-            e.append(f"direct_dialogue contains prohibited metaphysical language: {fantasy_hits[:3]}")
+        style_hits = find_style_violations(dialogue_text)
+        if style_hits:
+            e.append(f"direct_dialogue contains forbidden style categories: {style_hits[:3]}")
 
     io = obj.get("interactive_opportunities")
     if not isinstance(io, list) or not (1 <= len(io) <= 6):
         e.append("interactive_opportunities must be list len 1-6")
     else:
         io_text = " ".join(x for x in io if isinstance(x, str))
-        fantasy_hits = find_banned_fantasy_terms(io_text)
-        if fantasy_hits:
-            e.append(f"interactive_opportunities contains prohibited metaphysical language: {fantasy_hits[:3]}")
+        style_hits = find_style_violations(io_text)
+        if style_hits:
+            e.append(f"interactive_opportunities contains forbidden style categories: {style_hits[:3]}")
 
     na = obj.get("npc_activity")
     if not isinstance(na, list) or not (2 <= len(na) <= 12):
         e.append("npc_activity must be list len 2-12")
     else:
         npc_text = " ".join(x for x in na if isinstance(x, str))
-        fantasy_hits = find_banned_fantasy_terms(npc_text)
-        if fantasy_hits:
-            e.append(f"npc_activity contains fantasy-only language prohibited by simulation constraints: {fantasy_hits[:3]}")
+        style_hits = find_style_violations(npc_text)
+        if style_hits:
+            e.append(f"npc_activity contains forbidden style categories: {style_hits[:3]}")
+        for i, line in enumerate([x for x in na if isinstance(x, str)]):
+            for si, sent in enumerate(sentence_split(line)):
+                if sentence_has_specific_claim(sent) and not any(clean_for_match(sent) in clean_for_match(v) for v in packet_map.values()):
+                    e.append(f"npc_activity[{i}] sentence[{si}] claims specifics without literal evidence support")
 
     obs = obj.get("observations")
     if not isinstance(obs, list) or not (1 <= len(obs) <= 12):
         e.append("observations must be list len 1-12")
     else:
         for i, it in enumerate(obs):
-            if not isinstance(it, dict): continue
+            if not isinstance(it, dict):
+                continue
             err = validate_evidence_ids(it.get("evidence_ids"), packet_ids)
-            if err: e.append(f"observations[{i}].{err}")
+            if err:
+                e.append(f"observations[{i}].{err}")
+                continue
+            txt = it.get("text", "")
+            if sentence_has_specific_claim(txt):
+                quote = it.get("quote")
+                if not literal_quote_supported(quote, it.get("evidence_ids", []), packet_map):
+                    e.append(f"observations[{i}] specific claim must include literal supporting quote")
 
     claims = obj.get("claims")
     if not isinstance(claims, list) or len(claims) > 16:
         e.append("claims must be a list (0-16 items)")
     else:
         for i, it in enumerate(claims):
-            if not isinstance(it, dict): continue
-            
+            if not isinstance(it, dict):
+                continue
             err = validate_evidence_ids(it.get("evidence_ids"), packet_ids)
-            if err: 
+            if err:
                 e.append(f"claims[{i}].{err}")
                 continue
-            
             quote = it.get("quote")
             if not isinstance(quote, str) or len(quote.strip()) < 3:
                 e.append(f"claims[{i}] missing or invalid 'quote' (must be a literal substring)")
                 continue
-            
-            quote_clean = clean_for_match(quote)
-            found = False
-            for sid in it.get("evidence_ids", []):
-                full_text_clean = clean_for_match(packet_map.get(sid, ""))
-                if quote_clean in full_text_clean:
-                    found = True
-                    break
-            
-            if not found:
+            if not literal_quote_supported(quote, it.get("evidence_ids", []), packet_map):
                 e.append(f"claims[{i}] REJECTED BY CITATION GATE: quote '{clamp(quote, 35)}' not found literally in cited primary sources.")
 
     lim = obj.get("limitations")
@@ -1060,9 +1096,16 @@ def build_render_prompt(state: Dict[str, Any], history: List[Dict[str, str]], pl
     d["evidence_packet"] = [{"segment_id": p["segment_id"], "text": p["excerpt"]} for p in packet]
     return json.dumps(d, ensure_ascii=False)
 
-def build_auditor_prompt(scene_text: str, packet: List[Dict[str, str]]) -> str:
+def build_auditor_prompt(render_payload: Dict[str, Any], packet: List[Dict[str, str]]) -> str:
     d = copy.deepcopy(PROMPTS_DATA["auditor_prompt"])
-    d["scene_text"] = scene_text
+    d["render_payload"] = {
+        "sensory_environment": render_payload.get("sensory_environment", ""),
+        "npc_activity": render_payload.get("npc_activity", []),
+        "direct_dialogue": render_payload.get("direct_dialogue", []),
+        "interactive_opportunities": render_payload.get("interactive_opportunities", []),
+        "observations": render_payload.get("observations", []),
+        "claims": render_payload.get("claims", []),
+    }
     d["evidence_packet"] = [{"id": p["segment_id"], "text": p["excerpt"]} for p in packet]
     return json.dumps(d, ensure_ascii=False)
 
@@ -1115,7 +1158,10 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=16000)
     
     ap.add_argument("--debug", action="store_true", help="Print backend engine metadata, telemetry, and validation traces")
-    ap.add_argument("--strict-audit", action="store_true", help="Enable secondary LLM pass to ban orphan hallucinations entirely")
+    ap.add_argument("--strict-audit", dest="strict_audit", action="store_true", default=True, help="Enable secondary LLM pass to ban orphan hallucinations entirely (default: on)")
+    ap.add_argument("--no-strict-audit", dest="strict_audit", action="store_false", help="Disable secondary LLM strict auditor pass")
+    ap.add_argument("--llm-timeout", type=float, default=20.0, help="Timeout (seconds) for chat completions")
+    ap.add_argument("--embedding-timeout", type=float, default=20.0, help="Timeout (seconds) for embedding requests")
     ap.add_argument("--show-observations", action="store_true", default=False)
     ap.add_argument("--show-claims", action="store_true", default=False)
     
@@ -1306,7 +1352,7 @@ def main() -> None:
                     continue
                 if cmd == "llmtest":
                     msgs = [{"role": "user", "content": "Return JSON only: {\"ok\": true}"}]
-                    out = openai_chat(args.base_url, args.model, msgs, 0.0, 64, args.api_key)
+                    out = openai_chat(args.base_url, args.model, msgs, 0.0, 64, args.api_key, timeout_s=args.llm_timeout)
                     print("[LLMTEST] raw:", clamp(out, 240))
                     continue
                 if cmd == "audit":
@@ -1369,7 +1415,7 @@ def main() -> None:
                         {"role": "system", "content": build_system_prompt(era_config, state.get("running_summary", ""))},
                         {"role": "user", "content": "/no_think\n" + build_suggest_prompt(state, last_packet, n, era_config)},
                     ]
-                    raw = openai_chat(args.base_url, args.model, msgs, args.temperature, 700, args.api_key)
+                    raw = openai_chat(args.base_url, args.model, msgs, args.temperature, 700, args.api_key, timeout_s=args.llm_timeout)
                     diag.stop("LLM_Suggest")
                     
                     obj, err = try_json(raw)
@@ -1506,7 +1552,8 @@ def main() -> None:
                     vec_enabled=args.enable_vector,
                     vec_base_url=args.vec_base_url,
                     vec_model=args.vec_model,
-                    vec_api_key=args.api_key
+                    vec_api_key=args.api_key,
+                    embedding_timeout_s=args.embedding_timeout
                 )
 
                 if not packet:
@@ -1535,7 +1582,7 @@ def main() -> None:
                         msgs.append({"role": "assistant", "content": plan_last})
                         msgs.append({"role": "user", "content": "/no_think\n" + build_repair_prompt("TurnPlan", plan_last, plan_errs, packet)})
                     
-                    out = openai_chat(args.base_url, args.model, msgs, args.temperature, args.max_tokens, args.api_key)
+                    out = openai_chat(args.base_url, args.model, msgs, args.temperature, args.max_tokens, args.api_key, timeout_s=args.llm_timeout)
                     plan_last = out
                     obj, err = try_json(out)
                     if err:
@@ -1628,7 +1675,7 @@ def main() -> None:
                         msgs.append({"role": "assistant", "content": render_last})
                         msgs.append({"role": "user", "content": "/no_think\n" + build_repair_prompt("Render", render_last, render_errs, packet)})
                     
-                    out = openai_chat(args.base_url, args.model, msgs, args.temperature + 0.1, args.max_tokens, args.api_key)
+                    out = openai_chat(args.base_url, args.model, msgs, args.temperature + 0.1, args.max_tokens, args.api_key, timeout_s=args.llm_timeout)
                     render_last = out
                     obj, err = try_json(out)
                     if err:
@@ -1641,15 +1688,17 @@ def main() -> None:
                     if not render_errs and args.strict_audit:
                         diag.start("LLM_Strict_Auditor")
                         audit_msgs = [
-                            {"role": "user", "content": "/no_think\n" + build_auditor_prompt(obj.get("sensory_environment", "") + " " + " ".join(obj.get("npc_activity", [])), packet)}
+                            {"role": "system", "content": "You are a deterministic historical grounding auditor. Apply a strict rubric: (1) PASS only when specific historical claims are literally supported by evidence_packet text; (2) ignore mundane inferred details like generic weather/prices/basic actions; (3) FAIL any mystery, ominous, cryptic, or hidden-meaning framing; (4) audit all render fields in render_payload. Return JSON only and never add prose."},
+                            {"role": "user", "content": "/no_think\n" + build_auditor_prompt(obj, packet)}
                         ]
-                        audit_out = openai_chat(args.base_url, args.model, audit_msgs, 0.1, 512, args.api_key)
+                        audit_out = openai_chat(args.base_url, args.model, audit_msgs, 0.0, 512, args.api_key, timeout_s=args.llm_timeout)
                         diag.stop("LLM_Strict_Auditor")
                         
                         audit_obj, audit_err = try_json(audit_out)
                         if audit_obj and audit_obj.get("pass") is False:
                             unsupported = audit_obj.get("unsupported_claims", [])
-                            render_errs.append(f"STRICT AUDITOR FAILED: Hallucinated details detected - {unsupported}")
+                            style_violations = audit_obj.get("style_violations", [])
+                            render_errs.append(f"STRICT AUDITOR FAILED: unsupported={unsupported}; style_violations={style_violations}")
 
                     if render_errs:
                         if args.debug: print(f"[DEBUG] Render invalid (try {attempt}): {render_errs}")
@@ -1718,7 +1767,7 @@ def main() -> None:
                             {"role": "user", "content": summary_prompt_text}
                         ]
                         # Use deterministic temp for summarizer
-                        summary_out = openai_chat(args.base_url, args.model, sum_msgs, 0.1, 100, args.api_key)
+                        summary_out = openai_chat(args.base_url, args.model, sum_msgs, 0.1, 100, args.api_key, timeout_s=args.llm_timeout)
                         
                         if state.get("running_summary"):
                             state["running_summary"] += " " + summary_out.strip()
