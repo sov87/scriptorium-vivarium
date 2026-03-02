@@ -165,7 +165,7 @@ MIN_PACKET_LOCAL = 12
 PROMPT_EXCERPT_CHARS = 1200 
 
 TURNPLAN_RETRIES = 4
-RENDER_RETRIES = 2
+RENDER_RETRIES = 3
 AUDIT_RETRIES = 2
 
 STOPWORDS = {
@@ -182,7 +182,7 @@ GENERIC_TOUR_RE = re.compile(
 )
 
 AUTO_GOTO_RE = re.compile(
-    r"^(take me to|go to|bring me to|walk to|walk me to|take me into|head to|enter|travel to|explore|visit)\s+(the\s+)?(.+)$",
+    r"^(take me to|go to|bring me to|walk to|walk me to|take me into|head to|enter|travel to|move to|explore|visit)\s+(the\s+)?(.+)$",
     re.IGNORECASE
 )
 
@@ -193,9 +193,18 @@ GENERIC_MOVE_RE = re.compile(
 
 META_ROLE_PREFIX_RE = re.compile(r"^\s*\(meta\)\s*", re.IGNORECASE)
 META_ROLE_CUE_RE = re.compile(
-    r"\b(?:start\s+game\s+as|start\s+as|play\s+as|become|i\s+am\s+now|set\s+my\s+role\s+as|switch\s+role\s+to|change\s+role\s+to|change\s+to)\b",
+    r"\b(?:start\s+game\s+as|start\s+as|play\s+as|become|i\s+am\s+now|set\s+my\s+role\s+as)\b",
     re.IGNORECASE,
 )
+
+
+FORBIDDEN_OPPORTUNITY_RE = re.compile(
+    r"\b(?:hidden|secret|inscription|inscriptions|glyph|rune|omen|mystery|clue|symbolic|prophecy|sigil|whisper|conspiracy)\b",
+    re.IGNORECASE,
+)
+
+WAIT_ACTION_RE = re.compile(r"^\s*(?:wait|stand by|hold position|remain at my post|stay at my post|remain here|stay here)\b", re.IGNORECASE)
+META_TRAVEL_RE = re.compile(r"^\s*(?:move to|go to|travel to|head to|relocate to)\b", re.IGNORECASE)
 
 CLICHE_OPENINGS = [
     r"^(the\s+morning\s+sun\s+\w+[^.]{0,60}[,.]?\s+)",
@@ -277,66 +286,53 @@ def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str
     lowered = normalized.lower()
     if not (raw.lower().startswith("(meta)") or META_ROLE_CUE_RE.search(lowered)):
         return None
+    if META_TRAVEL_RE.match(lowered):
+        return None
 
     profiles = world.get("roleplay_starts", [])
-    if isinstance(profiles, list):
-        best: Optional[Dict[str, Any]] = None
-        best_score = 0
-        for profile in profiles:
-            if not isinstance(profile, dict):
-                continue
-            allowed_eras = profile.get("era_unlocked")
-            if isinstance(allowed_eras, list) and allowed_eras and active_era not in allowed_eras:
-                continue
-            triggers = [str(t).lower().strip() for t in profile.get("triggers", []) if isinstance(t, str) and t.strip()]
-            if not triggers:
-                continue
-            score = sum(1 for t in triggers if t in lowered)
-            if score > best_score:
-                best = profile
-                best_score = score
-        if best and best_score > 0:
-            return best
+    if not isinstance(profiles, list):
+        return None
 
-    role_text = normalized
-    role_text = re.sub(r"^(?:switch|change|set|start|play|become)\s+", "", role_text, flags=re.I)
-    role_text = re.sub(r"^(?:my\s+)?role\s+(?:to|as)\s+", "", role_text, flags=re.I)
-    role_text = re.sub(r"^to\s+", "", role_text, flags=re.I)
-    role_text = role_text.strip(" .") or "civilian"
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        allowed_eras = profile.get("era_unlocked")
+        if isinstance(allowed_eras, list) and allowed_eras and active_era not in allowed_eras:
+            continue
 
-    if re.search(r"\b(?:emperor|caesar|augustus)\b", role_text, flags=re.I) and not re.search(r"\b(?:guard|detail|protect|praetorian|soldier|bodyguard)\b", role_text, flags=re.I):
-        return {
-            "status": "Role request denied (cannot assume emperor-level identity)",
-            "spawn_location": "",
-            "npcs_present": [],
-            "inventory_add": [],
-            "inventory_remove": [],
-            "fatigue_floor": 0,
-            "world_note": "Meta role request denied: imperial identity not allowed.",
-        }
+        triggers = [str(t).lower().strip() for t in profile.get("triggers", []) if isinstance(t, str) and t.strip()]
+        if not triggers:
+            continue
 
-    role_lower = role_text.lower()
-    graph = world.get("graph", {}) if isinstance(world.get("graph", {}), dict) else {}
-    spawn = ""
-    if any(k in role_lower for k in ("praetorian", "guard", "soldier", "commander", "centurion")) and "castra praetoria" in graph:
-        spawn = "Castra Praetoria"
-    elif any(k in role_lower for k in ("senator", "patrician", "magistrate")):
-        spawn = "Forum Romanum"
-    elif any(k in role_lower for k in ("merchant", "vendor", "trader", "shopkeeper")) and "macellum" in graph:
-        spawn = "Macellum"
-    elif any(k in role_lower for k in ("plebeian", "laborer", "worker", "freedman")) and "subura" in graph:
-        spawn = "Subura"
+        score = sum(1 for t in triggers if t in lowered)
+        if score > best_score:
+            best = profile
+            best_score = score
 
-    status = role_text[:1].upper() + role_text[1:]
+    return best if best and best_score > 0 else None
+
+def build_wait_fast_render(state: Dict[str, Any]) -> Dict[str, Any]:
+    loc = state.get("loc_label", "Current location")
     return {
-        "status": status,
-        "spawn_location": spawn,
-        "npcs_present": [],
-        "inventory_add": [],
-        "inventory_remove": [],
-        "fatigue_floor": 0,
-        "world_note": f"Role profile active: {status}",
+        "sensory_environment": f"{loc}. Time passes in routine duty. Boots shift on stone, voices stay low, and no unusual development is confirmed.",
+        "direct_dialogue": ["A nearby guard says: 'No new report yet. Hold your position.'"],
+        "npc_activity": [
+            "A sentry checks straps and returns to watch.",
+            "A worker carries supplies across the yard and keeps moving."
+        ],
+        "interactive_opportunities": [
+            "Continue waiting and monitor the same post.",
+            "Ask the nearest guard for routine duty updates.",
+            "Inspect nearby equipment for ordinary wear."
+        ],
+        "observations": [],
+        "claims": [],
+        "limitations": ""
     }
+
+
 def build_role_rebase_fallback_render(state: Dict[str, Any], role_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     role_name = ""
     if isinstance(role_profile, dict):
@@ -366,86 +362,119 @@ def build_role_rebase_fallback_render(state: Dict[str, Any], role_profile: Optio
         "limitations": ""
     }
 
+def infer_generic_meta_role(user_text: str, world: Dict[str, Any], active_era: str) -> Optional[Dict[str, Any]]:
+    raw = (user_text or "").strip()
+    if not raw:
+        return None
 
-FORBIDDEN_ROLEPLAY_RE = re.compile(
-    r"\b(?:hidden|secret|mystery|mysterious|ominous|cryptic|prophecy|relic|inscription|inscriptions|sigil|omen|whisper|you are a shadow|no one talks|that\'s how you know)\b",
-    re.IGNORECASE,
-)
+    normalized = META_ROLE_PREFIX_RE.sub("", raw).strip()
+    lowered = normalized.lower()
+    if not (raw.lower().startswith("(meta)") or META_ROLE_CUE_RE.search(lowered)):
+        return None
+    if META_TRAVEL_RE.match(lowered):
+        return None
+
+    role_text = lowered
+    role_text = re.sub(r"^\s*(?:change\s+role\s+to|switch\s+role\s+to|start\s+game\s+as|start\s+as|play\s+as|become|set\s+my\s+role\s+as)\s*", "", role_text, flags=re.IGNORECASE)
+    role_text = re.sub(r"^[^a-z0-9]+|[^a-z0-9\s,'-]+$", "", role_text).strip(" .")
+    role_text = re.sub(r"\s+", " ", role_text).strip()
+    if len(role_text) < 3:
+        return None
+
+    # soft guardrail: do not allow becoming the emperor directly, but allow guarding/serving roles.
+    if re.search(r"\bemperor\b", role_text) and not re.search(r"\b(?:guard|bodyguard|detail|servant|attendant|praetorian|soldier|commander|officer)\b", role_text):
+        return None
+
+    spawn_location = ""
+    world_graph = world.get("graph", {}) if isinstance(world, dict) else {}
+    for node_key, node_data in world_graph.items():
+        names = [node_key] + [a for a in node_data.get("aliases", []) if isinstance(a, str)]
+        for nm in names:
+            if nm and nm.lower() in lowered:
+                allowed = node_data.get("era_unlocked")
+                if isinstance(allowed, list) and allowed and active_era not in allowed:
+                    continue
+                spawn_location = node_key.title()
+                break
+        if spawn_location:
+            break
+
+    return {
+        "id": "generic_meta_role",
+        "status": role_text.title(),
+        "spawn_location": spawn_location,
+        "npcs_present": [],
+        "inventory_add": [],
+        "inventory_remove": [],
+        "fatigue_floor": 0,
+        "world_note": f"Role profile active: {role_text}."
+    }
 
 
-def sanitize_render_payload(obj: Dict[str, Any], state: Dict[str, Any], is_social: bool) -> Dict[str, Any]:
-    if not isinstance(obj, dict):
-        return obj
+def strip_unsupported_specific_sentences(text: str, packet_map: Dict[str, str]) -> str:
+    kept: List[str] = []
+    for sent in sentence_split(text):
+        if sentence_has_specific_claim(sent) and not sentence_supported_by_evidence(sent, packet_map):
+            continue
+        kept.append(sent)
+    return " ".join(kept).strip()
 
-    def _clean_lines(lines: Any, max_n: int) -> List[str]:
-        out: List[str] = []
-        if not isinstance(lines, list):
-            return out
-        for line in lines:
+
+def sanitize_render_payload(obj: Dict[str, Any], packet: List[Dict[str, str]], is_social: bool) -> None:
+    packet_map = {item["segment_id"]: item.get("full_text", item.get("excerpt", "")) for item in packet}
+
+    se = obj.get("sensory_environment")
+    if isinstance(se, str):
+        cleaned = strip_unsupported_specific_sentences(se, packet_map)
+        if cleaned:
+            obj["sensory_environment"] = cleaned
+
+    na = obj.get("npc_activity")
+    if isinstance(na, list):
+        cleaned_lines: List[str] = []
+        for line in na:
             if not isinstance(line, str):
                 continue
-            t = norm_ws(line)
-            if not t:
+            c = strip_unsupported_specific_sentences(line, packet_map)
+            if c:
+                cleaned_lines.append(c)
+        if cleaned_lines:
+            obj["npc_activity"] = cleaned_lines[:12]
+
+    dd = obj.get("direct_dialogue")
+    if isinstance(dd, list):
+        cleaned_dd: List[str] = []
+        for line in dd:
+            if not isinstance(line, str):
                 continue
-            if FORBIDDEN_ROLEPLAY_RE.search(t):
+            if find_style_violations(line):
                 continue
-            out.append(t)
-            if len(out) >= max_n:
-                break
-        return out
+            c = strip_unsupported_specific_sentences(line, packet_map)
+            if c:
+                cleaned_dd.append(c)
+        if is_social and not cleaned_dd:
+            cleaned_dd = ["A guard shrugs: 'No solid news. We hear orders when orders come.'"]
+        obj["direct_dialogue"] = cleaned_dd[:15]
 
-    sensory = obj.get("sensory_environment", "")
-    if isinstance(sensory, str):
-        safe_sents = [sent for sent in sentence_split(sensory) if not FORBIDDEN_ROLEPLAY_RE.search(sent)]
-        if safe_sents:
-            obj["sensory_environment"] = " ".join(safe_sents)
+    io = obj.get("interactive_opportunities")
+    if isinstance(io, list):
+        cleaned_io: List[str] = []
+        for line in io:
+            if not isinstance(line, str):
+                continue
+            if FORBIDDEN_OPPORTUNITY_RE.search(line):
+                continue
+            if find_style_violations(line):
+                continue
+            cleaned_io.append(line.strip())
+        if not cleaned_io:
+            cleaned_io = [
+                "Ask a nearby worker what task is due next.",
+                "Check a practical area nearby for routine activity.",
+                "Speak with a present NPC about immediate duties."
+            ]
+        obj["interactive_opportunities"] = cleaned_io[:6]
 
-    obj["direct_dialogue"] = _clean_lines(obj.get("direct_dialogue", []), 8)
-    if is_social and not obj["direct_dialogue"]:
-        obj["direct_dialogue"] = ["\"A guard shrugs. Nothing certain. We keep to routine and wait for orders.\""]
-
-    obj["npc_activity"] = _clean_lines(obj.get("npc_activity", []), 8)
-    if len(obj["npc_activity"]) < 2:
-        obj["npc_activity"] = [
-            "A clerk checks a wax tablet and returns to routine work.",
-            "Two guards adjust their gear and resume their post."
-        ]
-
-    io = _clean_lines(obj.get("interactive_opportunities", []), 4)
-    if not io:
-        loc = state.get("loc_label", "the area")
-        io = [
-            f"Ask the nearest official for your next assigned task in {loc}.",
-            "Check the condition of your own equipment and belt fittings.",
-            "Speak with nearby workers about routine schedules and supplies."
-        ]
-    obj["interactive_opportunities"] = io
-
-    if not isinstance(obj.get("observations"), list):
-        obj["observations"] = []
-    if not isinstance(obj.get("claims"), list):
-        obj["claims"] = []
-    return obj
-
-
-def build_safe_fallback_render(state: Dict[str, Any], user_action: str) -> Dict[str, Any]:
-    loc = state.get("loc_label", "Unknown place")
-    return {
-        "sensory_environment": f"{loc}. Routine movement and conversation continue around you without any unusual event. Your action is acknowledged, but no extraordinary development is supported by current evidence.",
-        "direct_dialogue": ["\"A nearby local replies plainly: Nothing unusual to report. We keep to the day\'s work.\""],
-        "npc_activity": [
-            "A worker finishes a simple task and moves on.",
-            "A guard checks the area and returns to routine duty."
-        ],
-        "interactive_opportunities": [
-            "Ask a nearby person about immediate practical duties.",
-            "Inspect your current surroundings for ordinary wear or maintenance.",
-            "Move to a nearby connected location and continue your routine."
-        ],
-        "observations": [],
-        "claims": [],
-        "limitations": ""
-    }
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1627,14 +1656,14 @@ def main() -> None:
                     print("[OK] scope =", state["scope"])
                     continue
                 if cmd == "era":
-                    era_arg = arg.lower()
-                    if not era_arg or era_arg not in world_config.get("eras", {}):
+                    arg_l = arg.lower()
+                    if not arg_l or arg_l not in world_config.get("eras", {}):
                         print(f"[WARN] Invalid era. Choices: {list(world_config.get('eras', {}).keys())}")
                         continue
-                    state["era"] = era_arg
+                    state["era"] = arg_l
                     state["npcs_present"] = [] 
-                    print(f"\n[TIME TRAVEL] The world shimmers and shifts. You are now in the {era_arg.upper()} era.")
-                    print(f"Context: {world_config['eras'][era_arg]['system_context']}")
+                    print(f"\n[TIME TRAVEL] The world shimmers and shifts. You are now in the {arg_l.upper()} era.")
+                    print(f"Context: {world_config['eras'][arg_l]['system_context']}")
                     continue
                 if cmd == "goto":
                     if not arg:
@@ -1737,10 +1766,12 @@ def main() -> None:
             try:
                 system_constraint = ""
                 pre_applied_time = 0
-                state["last_user_action"] = user_in
-                is_social = any(w in user_in.lower() for w in SOCIAL_VERBS)
+                normalized_user_in = META_ROLE_PREFIX_RE.sub("", user_in).strip()
+                is_social = any(w in normalized_user_in.lower() for w in SOCIAL_VERBS)
                 role_rebase_applied = False
                 role_profile = detect_roleplay_start(user_in, world_config, state.get("era", ""))
+                if role_profile is None:
+                    role_profile = infer_generic_meta_role(user_in, world_config, state.get("era", ""))
 
                 if role_profile:
                     role_rebase_applied = True
@@ -1789,8 +1820,9 @@ def main() -> None:
                 
                 # --- 1. Dynamic City-Scale Spatial Navigation ---
                 diag.start("Graph_Navigation")
-                m_goto = AUTO_GOTO_RE.match(user_in)
-                m_move = GENERIC_MOVE_RE.match(user_in)
+                nav_text = normalized_user_in
+                m_goto = AUTO_GOTO_RE.match(nav_text)
+                m_move = GENERIC_MOVE_RE.match(nav_text)
                 
                 if m_goto:
                     target_raw = m_goto.group(3).strip().lower().strip(".")
@@ -1908,7 +1940,8 @@ def main() -> None:
                 last_packet = packet
                 packet_ids = {e["segment_id"] for e in packet}
 
-                if state["turn_index"] > 0 and state["turn_index"] % 5 == 0 and packet:
+                is_waiting_action = bool(WAIT_ACTION_RE.match(normalized_user_in))
+                if state["turn_index"] > 0 and state["turn_index"] % 5 == 0 and packet and not is_waiting_action and not role_rebase_applied:
                     event_seed = random.choice(packet)
                     system_constraint += f" DYNAMIC WORLD EVENT: Organically weave this specific historical detail into the background as an active, spontaneous event the player witnesses right now: '{clamp(event_seed.get('excerpt',''), 300)}'."
 
@@ -2006,11 +2039,17 @@ def main() -> None:
                     print(f"[DEBUG Action Eval] {plan_obj.get('action_evaluation')}")
 
                 # --- 5. Render Pass ---
+                is_waiting_action = bool(WAIT_ACTION_RE.match(normalized_user_in))
                 diag.start("LLM_Render_Pass")
                 render_obj: Optional[Dict[str, Any]] = None
+                if is_waiting_action:
+                    render_obj = build_wait_fast_render(state)
                 render_last = ""
                 render_errs: List[str] = []
-                for attempt in range(1, RENDER_RETRIES + 1):
+                max_render_attempts = 2 if role_rebase_applied else RENDER_RETRIES
+                for attempt in range(1, max_render_attempts + 1):
+                    if render_obj is not None:
+                        break
                     msgs = [
                         {"role": "system", "content": build_system_prompt(era_config, state.get("running_summary", ""))},
                         {"role": "user", "content": "/no_think\n" + build_render_prompt(state, list(history), plan_obj, packet)},
@@ -2027,7 +2066,8 @@ def main() -> None:
                         continue
                     
                     sanitize_render_evidence_ids(obj, packet_ids)
-                    obj = sanitize_render_payload(obj, state, is_social)
+                    if isinstance(obj, dict):
+                        sanitize_render_payload(obj, packet, is_social)
                     render_errs = validate_render(obj, packet, is_social)
                     
                     if not render_errs and args.strict_audit:
@@ -2057,8 +2097,9 @@ def main() -> None:
                         print("\n[WARN] Render validation failed after role rebase. Applying safe fallback scene and preserving updated state.")
                         render_obj = build_role_rebase_fallback_render(state, role_profile)
                     else:
-                        print("\n[WARN] Render validation failed. Applying safe fallback scene and preserving state.")
-                        render_obj = build_safe_fallback_render(state, user_in)
+                        print("\n[FAIL] Render validation failed. Rolling back state.")
+                        state = state_snapshot 
+                        continue
 
                 # =================================================================
                 # TRANSACTION COMMIT & LONG-TERM MEMORY SUMMARIZATION
