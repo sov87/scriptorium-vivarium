@@ -302,6 +302,36 @@ def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str
 
     return best if best and best_score > 0 else None
 
+def build_role_rebase_fallback_render(state: Dict[str, Any], role_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    role_name = ""
+    if isinstance(role_profile, dict):
+        role_name = str(role_profile.get("status", "")).strip()
+
+    loc = state.get("loc_label", "Unknown place")
+    sensory = f"{loc}. Boots scrape over stone and packed dirt while nearby voices trade short orders. You settle into your new role without fanfare as routine work continues around you."
+    if role_name:
+        sensory += f" Your standing is now {role_name}, and the scene responds to that role immediately."
+
+    opportunities = [
+        "Ask the nearest official what your immediate duties are.",
+        "Check your current equipment and confirm what is missing.",
+        "Move deeper into the local complex and look for your assigned post."
+    ]
+
+    return {
+        "sensory_environment": sensory,
+        "direct_dialogue": [],
+        "npc_activity": [
+            "A clerk updates a wax tablet and glances up to acknowledge you.",
+            "Two workers pass by carrying supplies and continue their routine."
+        ],
+        "interactive_opportunities": opportunities,
+        "observations": [],
+        "claims": [],
+        "limitations": ""
+    }
+
+
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0 
     dlat = math.radians(lat2 - lat1)
@@ -1591,9 +1621,11 @@ def main() -> None:
                 system_constraint = ""
                 pre_applied_time = 0
                 is_social = any(w in user_in.lower() for w in SOCIAL_VERBS)
+                role_rebase_applied = False
                 role_profile = detect_roleplay_start(user_in, world_config, state.get("era", ""))
 
                 if role_profile:
+                    role_rebase_applied = True
                     role_name = str(role_profile.get("status", "")).strip()
                     spawn_location = str(role_profile.get("spawn_location", "")).strip() or state["loc_label"]
                     spawn_npcs = [str(n).strip() for n in role_profile.get("npcs_present", []) if str(n).strip()]
@@ -1902,9 +1934,13 @@ def main() -> None:
                 diag.stop("LLM_Render_Pass")
 
                 if render_obj is None:
-                    print("\n[FAIL] Render validation failed. Rolling back state.")
-                    state = state_snapshot 
-                    continue
+                    if role_rebase_applied:
+                        print("\n[WARN] Render validation failed after role rebase. Applying safe fallback scene and preserving updated state.")
+                        render_obj = build_role_rebase_fallback_render(state, role_profile)
+                    else:
+                        print("\n[FAIL] Render validation failed. Rolling back state.")
+                        state = state_snapshot 
+                        continue
 
                 # =================================================================
                 # TRANSACTION COMMIT & LONG-TERM MEMORY SUMMARIZATION
