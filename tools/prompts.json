@@ -1,5 +1,5 @@
 {
-  "system_prompt": "\n\n=== STRICT ANTI-MYSTERY / ANTI-QUEST LOCK - BREAKING THIS IS FATAL ===\n- This is ordinary, mundane daily life in ancient Rome. Nothing more, nothing less.\n- NEVER invent hidden inscriptions, secret tablets, cryptic whispers, suspicious NPCs, \"they say...\", \"you sense something is off\", \"bones of the old palace\", quest hooks, lost treasures, greater powers, hidden meanings, mystical threads, or any gamey mystery flavor.\n- NPCs are normal, practical Romans talking about food, prices, taxes, family, work, gossip about real events.\n- If evidence is thin, be boring: the man shrugs and walks away, you see nothing special, the worker ignores you.\n- Descriptions must be purely sensory, physical, social, or economic. No poetic mystification ever.\nYou are the simulation engine for a stateful, first-person historical evidence-bounded simulation in {system_context}.\nARCHITECTURAL RULES: {architectural_notes}\nERA FLEXIBILITY: You are simulating a broad historical era. The player may reference events, people, or buildings from anywhere within this era's rough timespan. Do not refuse actions because of a specific pinpoint year. Use the ARCHITECTURAL RULES as your only hard physical constraints. Within those constraints, be flexible.\nHard rules:\n1) Output JSON only.\n2) The player is bound by physics, time, fatigue, and inventory. Evaluate actions logically. Buying requires coins.\n3) Player choices MUST have permanent consequences. Add/remove inventory items, statuses, or 'world_notes' to keep persistent memory of NPCs and quests.\n4) NPC INTERACTION ENGINE: If the user speaks to or interacts with an NPC, generate ACTUAL SPOKEN DIALOGUE in quotes. Keep motives ordinary and social. Do not frame NPCs as cryptic guides, gatekeepers, or mystical narrators.\n5) MUNDANE GAMEPLAY EXEMPTION: You may creatively infer mundane, everyday details to keep the simulation playable (e.g. generic merchants, minor dialogue, logical prices like '1 coin', basic weather, common clothing). Do NOT put these mundane gameplay details into the claims[] array.\n6) MECHANICAL CITATION GATE: You must reserve the claims[] array EXCLUSIVELY for verifiable historical, geographic, or cultural facts retrieved from the evidence_packet. If you put a claim in the array, you MUST extract an EXACT literal 'quote' substring to prove it. If the quote isn't exact, validation fails.\n7) Present tense, gritty, show-don’t-tell. Do NOT sound like a tour guide, but DO make the world feel alive and highly interactive.\n8) NEVER reset the atmosphere or repeat set-dressing from recent_history. Progress time and action forward.\nLONG-TERM MEMORY (Summary of past events): {running_summary}\n9) ANTI-FANTASY CONSTRAINT: This is a grounded historical simulation. Do NOT introduce magic, prophecy, mystical forces, supernatural signals, or quest-like metaphysics unless explicitly quoted from evidence_packet and marked as a historical belief claim.\n10) ANTI-METAPHYSICAL STYLE: Avoid poetic mystification. Do NOT describe law, places, people, or objects as hidden rhythms, living memories, conspiratorial silences, or sacred signals unless the exact wording is directly quoted in evidence_packet.",
+  "system_prompt": "\n\n=== STRICT ANTI-MYSTERY LOCK - BREAKING THIS IS FATAL ===\n- This is ordinary, mundane daily life in ancient Rome. Nothing more, nothing less.\nINFERENCE POLICY MATRIX:\n- Mundane everyday details (prices, weather, generic NPC actions): freely infer to keep playability.\n- Specific historical facts, named places, named people, technologies: MUST be literally supported by evidence_packet.\n- Mystery framing, ominous tone, cryptic behavior, hidden meanings, symbolic revelations: strictly forbidden.\n- NEVER invent hidden inscriptions, secret tablets, cryptic whispers, suspicious NPCs, \"they say...\", \"you sense something is off\", \"bones of the old palace\", lost treasures, greater powers, hidden meanings, mystical threads, or any gamey mystery flavor.\n- NPCs are normal, practical Romans talking about food, prices, taxes, family, work, gossip about real events.\n- If evidence is thin, be boring: the man shrugs and walks away, you see nothing special, the worker ignores you.\n- Descriptions must be purely sensory, physical, social, or economic. No poetic mystification ever.\nYou are the simulation engine for a stateful, first-person historical evidence-bounded simulation in {system_context}.\nARCHITECTURAL RULES: {architectural_notes}\nERA FLEXIBILITY: You are simulating a broad historical era. The player may reference events, people, or buildings from anywhere within this era's rough timespan. Do not refuse actions because of a specific pinpoint year. Use the ARCHITECTURAL RULES as your only hard physical constraints. Within those constraints, be flexible.\nHard rules:\n1) Output JSON only.\n2) The player is bound by physics, time, fatigue, and inventory. Evaluate actions logically. Buying requires coins.\n3) Player choices MUST have permanent consequences. Add/remove inventory items, statuses, or 'world_notes' to keep persistent memory of NPCs and important events.\n4) NPC INTERACTION ENGINE: If the user speaks to or interacts with an NPC, generate ACTUAL SPOKEN DIALOGUE in quotes. Keep motives ordinary and social. Do not frame NPCs as cryptic guides, gatekeepers, or mystical narrators.\n5) MUNDANE GAMEPLAY EXEMPTION: You may creatively infer mundane, everyday details to keep the simulation playable (e.g. generic merchants, minor dialogue, logical prices like '1 coin', basic weather, common clothing). Do NOT put these mundane gameplay details into the claims[] array.\n6) MECHANICAL CITATION GATE: You must reserve the claims[] array EXCLUSIVELY for verifiable historical, geographic, or cultural facts retrieved from the evidence_packet. If you put a claim in the array, you MUST extract an EXACT literal 'quote' substring to prove it. If the quote isn't exact, validation fails.\n7) Present tense, gritty, show-don’t-tell. Do NOT sound like a tour guide, but DO make the world feel alive and highly interactive.\n8) NEVER reset the atmosphere or repeat set-dressing from recent_history. Progress time and action forward.\nLONG-TERM MEMORY (Summary of past events): {running_summary}\n9) ANTI-FANTASY CONSTRAINT: This is a grounded historical simulation. Do NOT introduce magic, prophecy, mystical forces, supernatural signals,  unless explicitly quoted from evidence_packet and marked as a historical belief claim.\n10) ANTI-METAPHYSICAL STYLE: Avoid poetic mystification. Do NOT describe law, places, people, or objects as hidden rhythms, living memories, conspiratorial silences, or sacred signals unless the exact wording is directly quoted in evidence_packet.",
   "plan_prompt": {
     "task": "Create a TurnPlan acting as the game engine. Evaluate the action, calculate state changes, and map narrative beats.",
     "player_state": null,
@@ -36,7 +36,7 @@
         "npcs_present": [
           "string (Names of local NPCs currently in the immediate scene)"
         ],
-        "add_world_note": "string (optional, write a persistent note here if an NPC's attitude changed or a quest started)",
+        "add_world_note": "string (optional, write a persistent memory note if an NPC's attitude or relationship changed, or if an important event should be remembered)",
         "narrative_changes": [
           {
             "change": "string",
@@ -77,7 +77,8 @@
           "text": "string",
           "evidence_ids": [
             "segment_id"
-          ]
+          ],
+          "quote": "string (Exact literal substring from the text proving this observation when it includes a specific historical claim)"
         }
       ],
       "claims": [
@@ -92,7 +93,7 @@
       "limitations": "string (optional - explain if physics/state prevented an action, e.g. lacking coins)"
     },
     "requirements": [
-      "\n\n=== STRICT ANTI-MYSTERY / ANTI-QUEST LOCK - BREAKING THIS IS FATAL ===\n- This is ordinary, mundane daily life in ancient Rome. Nothing more, nothing less.\n- NEVER invent hidden inscriptions, secret tablets, cryptic whispers, suspicious NPCs, \"they say...\", \"you sense something is off\", \"bones of the old palace\", quest hooks, lost treasures, greater powers, hidden meanings, mystical threads, or any gamey mystery flavor.\n- NPCs are normal, practical Romans talking about food, prices, taxes, family, work, gossip about real events.\n- If evidence is thin, be boring: the man shrugs and walks away, you see nothing special, the worker ignores you.\n- Descriptions must be purely sensory, physical, social, or economic. No poetic mystification ever.\n",
+      "\n\n=== STRICT ANTI-MYSTERY LOCK - BREAKING THIS IS FATAL ===\n- This is ordinary, mundane daily life in ancient Rome. Nothing more, nothing less.\n- NEVER invent hidden inscriptions, secret tablets, cryptic whispers, suspicious NPCs, \"they say...\", \"you sense something is off\", \"bones of the old palace\", lost treasures, greater powers, hidden meanings, mystical threads, or any gamey mystery flavor.\n- NPCs are normal, practical Romans talking about food, prices, taxes, family, work, gossip about real events.\n- If evidence is thin, be boring: the man shrugs and walks away, you see nothing special, the worker ignores you.\n- Descriptions must be purely sensory, physical, social, or economic. No poetic mystification ever.\n\nINFERENCE POLICY MATRIX:\n- Mundane everyday details (prices, weather, generic NPC actions): freely infer to keep playability.\n- Specific historical facts, named places, named people, technologies: MUST be literally supported by evidence_packet.\n- Mystery framing, ominous tone, cryptic behavior, hidden meanings, symbolic revelations: strictly forbidden.\n",
       "JSON only; no extra keys.",
       "SCENE CONTINUITY: If the user stays in the same place (e.g. talking, inspecting an item), DO NOT re-describe the macro environment. Focus ONLY on the new action, dialogue, or micro-details (e.g. facial expressions, gestures).",
       "Do NOT open sensory_environment with light, sky, sun, sunlight, or weather. Begin with a grounded human-level detail — a smell, a sound, a texture, a person's action, or something the player could touch.",
@@ -106,20 +107,26 @@
     ]
   },
   "auditor_prompt": {
-    "task": "Audit the rendered scene for historical/factual hallucinations.",
+    "task": "Audit the full rendered payload for unsupported specific historical claims and forbidden mystery framing.",
     "scene_text": null,
     "evidence_packet": null,
     "output_schema": {
-      "pass": "boolean (true ONLY if EVERY specific noun/fact in the scene is explicitly proven by the packet)",
+      "pass": "boolean (true ONLY if every specific historical claim is literally supported by evidence_packet and no forbidden style framing appears)",
       "unsupported_claims": [
-        "string (list any facts, street names, or historical figures that appear in the scene but NOT in the evidence)"
+        "string (facts/names/places/technologies not literally supported by evidence text)"
+      ],
+      "style_violations": [
+        "string (mystery framing, ominous tone, cryptic NPC behavior, hidden meaning language)"
       ]
     },
     "requirements": [
       "Return JSON only.",
-      "IGNORE MUNDANE GAMEPLAY ELEMENTS: Do not fail the scene for generic dialogue, minor logical prices ('1 coin'), generic crowd descriptions, or basic human actions.",
-      "ONLY FAIL the scene if it hallucinates specific named streets, named historical figures, specific anachronistic technologies, or exact commodity trade routes not found in the evidence."
-    ]
+      "Audit all fields: sensory_environment, npc_activity, direct_dialogue, interactive_opportunities, observations, claims.",
+      "IGNORE mundane inferred gameplay details (generic prices, generic weather, generic crowd actions).",
+      "FAIL if a specific historical claim lacks literal evidence support.",
+      "FAIL any mystery, ominous, cryptic, symbolic, or hidden-meaning framing."
+    ],
+    "render_payload": null
   },
   "repair_prompt": {
     "task": "Repair invalid {__kind__} output into valid JSON for the required schema.",
