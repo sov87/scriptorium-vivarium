@@ -165,7 +165,7 @@ MIN_PACKET_LOCAL = 12
 PROMPT_EXCERPT_CHARS = 1200 
 
 TURNPLAN_RETRIES = 4
-RENDER_RETRIES = 4
+RENDER_RETRIES = 2
 AUDIT_RETRIES = 2
 
 STOPWORDS = {
@@ -174,7 +174,7 @@ STOPWORDS = {
     "is", "are", "was", "were", "what", "where", "how", "tell", "about", "then", "now"
 }
 
-SOCIAL_VERBS = {"talk", "speak", "ask", "tell", "say", "greet", "buy", "sell", "listen", "hear", "haggle", "argue", "discuss", "trade"}
+SOCIAL_VERBS = {"talk", "speak", "ask", "tell", "say", "greet", "buy", "sell", "listen", "hear", "haggle", "argue", "discuss", "trade", "gossip", "chat", "negotiate"}
 
 GENERIC_TOUR_RE = re.compile(
     r"^(show me around|show me the city|give me a tour|walk me around|take me around|tour|around|look|explore|wait|stay|continue|walk|wander|roam)\.?$",
@@ -189,6 +189,12 @@ AUTO_GOTO_RE = re.compile(
 GENERIC_MOVE_RE = re.compile(
     r"^(walk|go|head|travel|run|move)\s+(north|south|east|west|outside|inside|away|back|down|up|forward)", 
     re.IGNORECASE
+)
+
+META_ROLE_PREFIX_RE = re.compile(r"^\s*\(meta\)\s*", re.IGNORECASE)
+META_ROLE_CUE_RE = re.compile(
+    r"\b(?:start\s+game\s+as|start\s+as|play\s+as|become|i\s+am\s+now|set\s+my\s+role\s+as|switch\s+role\s+to|change\s+role\s+to|change\s+to)\b",
+    re.IGNORECASE,
 )
 
 CLICHE_OPENINGS = [
@@ -260,6 +266,187 @@ def minutes_to_time_of_day(minutes: int) -> str:
     if m < 1080: return "afternoon"
     if m < 1200: return "evening"
     return "night"
+
+
+def detect_roleplay_start(user_text: str, world: Dict[str, Any], active_era: str) -> Optional[Dict[str, Any]]:
+    raw = (user_text or "").strip()
+    if not raw:
+        return None
+
+    normalized = META_ROLE_PREFIX_RE.sub("", raw).strip()
+    lowered = normalized.lower()
+    if not (raw.lower().startswith("(meta)") or META_ROLE_CUE_RE.search(lowered)):
+        return None
+
+    profiles = world.get("roleplay_starts", [])
+    if isinstance(profiles, list):
+        best: Optional[Dict[str, Any]] = None
+        best_score = 0
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            allowed_eras = profile.get("era_unlocked")
+            if isinstance(allowed_eras, list) and allowed_eras and active_era not in allowed_eras:
+                continue
+            triggers = [str(t).lower().strip() for t in profile.get("triggers", []) if isinstance(t, str) and t.strip()]
+            if not triggers:
+                continue
+            score = sum(1 for t in triggers if t in lowered)
+            if score > best_score:
+                best = profile
+                best_score = score
+        if best and best_score > 0:
+            return best
+
+    role_text = normalized
+    role_text = re.sub(r"^(?:switch|change|set|start|play|become)\s+", "", role_text, flags=re.I)
+    role_text = re.sub(r"^(?:my\s+)?role\s+(?:to|as)\s+", "", role_text, flags=re.I)
+    role_text = re.sub(r"^to\s+", "", role_text, flags=re.I)
+    role_text = role_text.strip(" .") or "civilian"
+
+    if re.search(r"\b(?:emperor|caesar|augustus)\b", role_text, flags=re.I) and not re.search(r"\b(?:guard|detail|protect|praetorian|soldier|bodyguard)\b", role_text, flags=re.I):
+        return {
+            "status": "Role request denied (cannot assume emperor-level identity)",
+            "spawn_location": "",
+            "npcs_present": [],
+            "inventory_add": [],
+            "inventory_remove": [],
+            "fatigue_floor": 0,
+            "world_note": "Meta role request denied: imperial identity not allowed.",
+        }
+
+    role_lower = role_text.lower()
+    graph = world.get("graph", {}) if isinstance(world.get("graph", {}), dict) else {}
+    spawn = ""
+    if any(k in role_lower for k in ("praetorian", "guard", "soldier", "commander", "centurion")) and "castra praetoria" in graph:
+        spawn = "Castra Praetoria"
+    elif any(k in role_lower for k in ("senator", "patrician", "magistrate")):
+        spawn = "Forum Romanum"
+    elif any(k in role_lower for k in ("merchant", "vendor", "trader", "shopkeeper")) and "macellum" in graph:
+        spawn = "Macellum"
+    elif any(k in role_lower for k in ("plebeian", "laborer", "worker", "freedman")) and "subura" in graph:
+        spawn = "Subura"
+
+    status = role_text[:1].upper() + role_text[1:]
+    return {
+        "status": status,
+        "spawn_location": spawn,
+        "npcs_present": [],
+        "inventory_add": [],
+        "inventory_remove": [],
+        "fatigue_floor": 0,
+        "world_note": f"Role profile active: {status}",
+    }
+def build_role_rebase_fallback_render(state: Dict[str, Any], role_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    role_name = ""
+    if isinstance(role_profile, dict):
+        role_name = str(role_profile.get("status", "")).strip()
+
+    loc = state.get("loc_label", "Unknown place")
+    sensory = f"{loc}. Boots scrape over stone and packed dirt while nearby voices trade short orders. You settle into your new role without fanfare as routine work continues around you."
+    if role_name:
+        sensory += f" Your standing is now {role_name}, and the scene responds to that role immediately."
+
+    opportunities = [
+        "Ask the nearest official what your immediate duties are.",
+        "Check your current equipment and confirm what is missing.",
+        "Move deeper into the local complex and look for your assigned post."
+    ]
+
+    return {
+        "sensory_environment": sensory,
+        "direct_dialogue": [],
+        "npc_activity": [
+            "A clerk updates a wax tablet and glances up to acknowledge you.",
+            "Two workers pass by carrying supplies and continue their routine."
+        ],
+        "interactive_opportunities": opportunities,
+        "observations": [],
+        "claims": [],
+        "limitations": ""
+    }
+
+
+FORBIDDEN_ROLEPLAY_RE = re.compile(
+    r"\b(?:hidden|secret|mystery|mysterious|ominous|cryptic|prophecy|relic|inscription|inscriptions|sigil|omen|whisper|you are a shadow|no one talks|that\'s how you know)\b",
+    re.IGNORECASE,
+)
+
+
+def sanitize_render_payload(obj: Dict[str, Any], state: Dict[str, Any], is_social: bool) -> Dict[str, Any]:
+    if not isinstance(obj, dict):
+        return obj
+
+    def _clean_lines(lines: Any, max_n: int) -> List[str]:
+        out: List[str] = []
+        if not isinstance(lines, list):
+            return out
+        for line in lines:
+            if not isinstance(line, str):
+                continue
+            t = norm_ws(line)
+            if not t:
+                continue
+            if FORBIDDEN_ROLEPLAY_RE.search(t):
+                continue
+            out.append(t)
+            if len(out) >= max_n:
+                break
+        return out
+
+    sensory = obj.get("sensory_environment", "")
+    if isinstance(sensory, str):
+        safe_sents = [sent for sent in sentence_split(sensory) if not FORBIDDEN_ROLEPLAY_RE.search(sent)]
+        if safe_sents:
+            obj["sensory_environment"] = " ".join(safe_sents)
+
+    obj["direct_dialogue"] = _clean_lines(obj.get("direct_dialogue", []), 8)
+    if is_social and not obj["direct_dialogue"]:
+        obj["direct_dialogue"] = ["\"A guard shrugs. Nothing certain. We keep to routine and wait for orders.\""]
+
+    obj["npc_activity"] = _clean_lines(obj.get("npc_activity", []), 8)
+    if len(obj["npc_activity"]) < 2:
+        obj["npc_activity"] = [
+            "A clerk checks a wax tablet and returns to routine work.",
+            "Two guards adjust their gear and resume their post."
+        ]
+
+    io = _clean_lines(obj.get("interactive_opportunities", []), 4)
+    if not io:
+        loc = state.get("loc_label", "the area")
+        io = [
+            f"Ask the nearest official for your next assigned task in {loc}.",
+            "Check the condition of your own equipment and belt fittings.",
+            "Speak with nearby workers about routine schedules and supplies."
+        ]
+    obj["interactive_opportunities"] = io
+
+    if not isinstance(obj.get("observations"), list):
+        obj["observations"] = []
+    if not isinstance(obj.get("claims"), list):
+        obj["claims"] = []
+    return obj
+
+
+def build_safe_fallback_render(state: Dict[str, Any], user_action: str) -> Dict[str, Any]:
+    loc = state.get("loc_label", "Unknown place")
+    return {
+        "sensory_environment": f"{loc}. Routine movement and conversation continue around you without any unusual event. Your action is acknowledged, but no extraordinary development is supported by current evidence.",
+        "direct_dialogue": ["\"A nearby local replies plainly: Nothing unusual to report. We keep to the day\'s work.\""],
+        "npc_activity": [
+            "A worker finishes a simple task and moves on.",
+            "A guard checks the area and returns to routine duty."
+        ],
+        "interactive_opportunities": [
+            "Ask a nearby person about immediate practical duties.",
+            "Inspect your current surroundings for ordinary wear or maintenance.",
+            "Move to a nearby connected location and continue your routine."
+        ],
+        "observations": [],
+        "claims": [],
+        "limitations": ""
+    }
+
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0 
@@ -1440,13 +1627,14 @@ def main() -> None:
                     print("[OK] scope =", state["scope"])
                     continue
                 if cmd == "era":
-                    if not arg or arg not in world_config.get("eras", {}):
+                    era_arg = arg.lower()
+                    if not era_arg or era_arg not in world_config.get("eras", {}):
                         print(f"[WARN] Invalid era. Choices: {list(world_config.get('eras', {}).keys())}")
                         continue
-                    state["era"] = arg
+                    state["era"] = era_arg
                     state["npcs_present"] = [] 
-                    print(f"\n[TIME TRAVEL] The world shimmers and shifts. You are now in the {arg.upper()} era.")
-                    print(f"Context: {world_config['eras'][arg]['system_context']}")
+                    print(f"\n[TIME TRAVEL] The world shimmers and shifts. You are now in the {era_arg.upper()} era.")
+                    print(f"Context: {world_config['eras'][era_arg]['system_context']}")
                     continue
                 if cmd == "goto":
                     if not arg:
@@ -1549,7 +1737,55 @@ def main() -> None:
             try:
                 system_constraint = ""
                 pre_applied_time = 0
+                state["last_user_action"] = user_in
                 is_social = any(w in user_in.lower() for w in SOCIAL_VERBS)
+                role_rebase_applied = False
+                role_profile = detect_roleplay_start(user_in, world_config, state.get("era", ""))
+
+                if role_profile:
+                    role_rebase_applied = True
+                    role_name = str(role_profile.get("status", "")).strip()
+                    spawn_location = str(role_profile.get("spawn_location", "")).strip() or state["loc_label"]
+                    spawn_npcs = [str(n).strip() for n in role_profile.get("npcs_present", []) if str(n).strip()]
+                    add_items = [str(i).strip() for i in role_profile.get("inventory_add", []) if str(i).strip()]
+                    remove_items = [str(i).strip() for i in role_profile.get("inventory_remove", []) if str(i).strip()]
+
+                    if role_name:
+                        state["status_effects"] = [s for s in state.get("status_effects", []) if isinstance(s, str) and not s.lower().startswith("role:")]
+                        state["status_effects"] = [s for s in state["status_effects"] if s != role_name]
+                        state["status_effects"].append(role_name)
+
+                    state["loc_label"] = spawn_location.title()
+                    state["loc_id"] = None
+                    state["coords"] = None
+                    if spawn_npcs:
+                        state["npcs_present"] = spawn_npcs[:5]
+                    else:
+                        state["npcs_present"] = []
+
+                    for item in remove_items:
+                        if item in state["inventory"]:
+                            state["inventory"].remove(item)
+                    for item in add_items:
+                        if item not in state["inventory"]:
+                            state["inventory"].append(item)
+
+                    fatigue_floor = role_profile.get("fatigue_floor")
+                    if isinstance(fatigue_floor, int):
+                        state["fatigue"] = max(fatigue_floor, state.get("fatigue", 0))
+
+                    note = str(role_profile.get("world_note", "")).strip()
+                    if note and note not in state["world_notes"]:
+                        if len(state["world_notes"]) >= 15:
+                            state["world_notes"].pop(0)
+                        state["world_notes"].append(note)
+
+                    system_constraint = (
+                        f"META ROLE SWITCH APPLIED: player role is now '{role_name or 'custom role'}'. "
+                        f"Canonical location is now {state['loc_label']}. Treat this as an immediate continuity rebasing. "
+                        "Do not narrate travel from the previous role/location unless explicitly requested by the player. "
+                        "Render the new role's local scene with grounded mundane details only."
+                    )
                 
                 # --- 1. Dynamic City-Scale Spatial Navigation ---
                 diag.start("Graph_Navigation")
@@ -1791,6 +2027,7 @@ def main() -> None:
                         continue
                     
                     sanitize_render_evidence_ids(obj, packet_ids)
+                    obj = sanitize_render_payload(obj, state, is_social)
                     render_errs = validate_render(obj, packet, is_social)
                     
                     if not render_errs and args.strict_audit:
@@ -1816,9 +2053,12 @@ def main() -> None:
                 diag.stop("LLM_Render_Pass")
 
                 if render_obj is None:
-                    print("\n[FAIL] Render validation failed. Rolling back state.")
-                    state = state_snapshot 
-                    continue
+                    if role_rebase_applied:
+                        print("\n[WARN] Render validation failed after role rebase. Applying safe fallback scene and preserving updated state.")
+                        render_obj = build_role_rebase_fallback_render(state, role_profile)
+                    else:
+                        print("\n[WARN] Render validation failed. Applying safe fallback scene and preserving state.")
+                        render_obj = build_safe_fallback_render(state, user_in)
 
                 # =================================================================
                 # TRANSACTION COMMIT & LONG-TERM MEMORY SUMMARIZATION
