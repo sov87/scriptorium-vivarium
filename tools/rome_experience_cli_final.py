@@ -909,6 +909,12 @@ def extract_hard_claim_anchors(sentence: str) -> List[str]:
     return out
 
 
+def observation_requires_literal_quote(text: str) -> bool:
+    # Thread-the-needle rule: only force literal quotes for hard historical assertions,
+    # not for mundane ambient observations about ordinary activity.
+    return bool(HARD_HISTORICAL_CLAIM_RE.search(text or ""))
+
+
 def sentence_supported_by_evidence(sentence: str, packet_map: Dict[str, str]) -> bool:
     s_clean = clean_for_match(sentence)
     if not s_clean:
@@ -1140,10 +1146,10 @@ def validate_render(obj: Any, packet: List[Dict[str, str]], is_social: bool) -> 
                 e.append(f"observations[{i}].{err}")
                 continue
             txt = it.get("text", "")
-            if sentence_has_specific_claim(txt):
+            if observation_requires_literal_quote(txt):
                 quote = it.get("quote")
                 if not literal_quote_supported(quote, it.get("evidence_ids", []), packet_map):
-                    e.append(f"observations[{i}] specific claim must include literal supporting quote")
+                    e.append(f"observations[{i}] hard historical claim must include literal supporting quote")
 
     claims = obj.get("claims")
     if not isinstance(claims, list) or len(claims) > 16:
