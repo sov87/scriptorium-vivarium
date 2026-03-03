@@ -713,7 +713,9 @@
           "fatigue_floor": 0,
           "world_note": "Role profile active: merchant operating in market circuits."
         }
-      ]
+      ],
+      "setting_label": "ancient Rome",
+      "people_label": "Romans"
     },
     "anglo_saxon": {
       "name": "Anglo-Saxon England",
@@ -922,7 +924,93 @@
             "roman walls"
           ]
         }
-      }
+      },
+      "roleplay_starts": [
+        {
+          "label": "gate watch",
+          "status": "role: gate watch",
+          "triggers": [
+            "gate watch",
+            "watchman",
+            "guard the west gate",
+            "stand watch"
+          ],
+          "spawn_location": "West Gate",
+          "npcs_present": [
+            "watch sergeant",
+            "gate porter"
+          ],
+          "inventory_add": [
+            "ash spear",
+            "wool cloak"
+          ],
+          "inventory_remove": [],
+          "fatigue_floor": 8,
+          "world_note": "Assigned to routine gate-watch duty.",
+          "era_unlocked": [
+            "alfredian",
+            "late_saxon",
+            "norman_transition"
+          ]
+        },
+        {
+          "label": "market reeve",
+          "status": "role: market reeve",
+          "triggers": [
+            "reeve",
+            "market reeve",
+            "town reeve",
+            "collect dues"
+          ],
+          "spawn_location": "Market",
+          "npcs_present": [
+            "stallholder",
+            "scales clerk"
+          ],
+          "inventory_add": [
+            "wax tablet",
+            "bone stylus"
+          ],
+          "inventory_remove": [],
+          "fatigue_floor": 5,
+          "world_note": "Charged with tallying stall dues and settling disputes.",
+          "era_unlocked": [
+            "alfredian",
+            "late_saxon",
+            "norman_transition"
+          ]
+        },
+        {
+          "label": "minster scribe",
+          "status": "role: minster scribe",
+          "triggers": [
+            "scribe",
+            "monk",
+            "copy texts",
+            "scriptorium"
+          ],
+          "spawn_location": "Minster",
+          "npcs_present": [
+            "senior monk",
+            "novice"
+          ],
+          "inventory_add": [
+            "reed pen",
+            "ink horn",
+            "parchment strip"
+          ],
+          "inventory_remove": [],
+          "fatigue_floor": 2,
+          "world_note": "Attached to the minster writing room for routine copying work.",
+          "era_unlocked": [
+            "alfredian",
+            "late_saxon",
+            "norman_transition"
+          ]
+        }
+      ],
+      "setting_label": "Anglo-Saxon England",
+      "people_label": "Anglo-Saxons"
     }
   }
 }
